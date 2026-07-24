@@ -1,4 +1,9 @@
-import type { CandidateEvent, Provenance } from './event.js';
+import type {
+  CandidateEvent,
+  InterpretationCandidate,
+  Provenance,
+} from './event.js';
+import { INTERPRETATION_EVENT_KIND } from './event.js';
 import type { DimensionSpec } from './spec.js';
 
 /**
@@ -206,6 +211,133 @@ export function evaluateCandidate(
     checkProvenance(schemaCheck.candidate, spec),
     checkContentSize(schemaCheck.candidate),
     checkDittoInterpretationSeparation(schemaCheck.candidate),
+  ].filter((reason): reason is string => reason !== undefined);
+
+  return reasons.length === 0 ? { ok: true } : { ok: false, reasons };
+}
+
+type InterpretationSchemaCheck =
+  | { readonly ok: true; readonly candidate: InterpretationCandidate }
+  | { readonly ok: false; readonly reasons: readonly string[] };
+
+/**
+ * NIP-01 structural validation for interpretation candidates — same
+ * boundary role as checkSchema, but interpretation has its own fixed kind
+ * and no provenance to validate (CONTEXT.md — Interpretation, NIP gate).
+ */
+function checkInterpretationSchema(input: unknown): InterpretationSchemaCheck {
+  const reasons: string[] = [];
+
+  if (!isRecord(input)) {
+    return { ok: false, reasons: ['schema:not-an-object'] };
+  }
+
+  const { kind, content, tags, createdAt } = input;
+
+  const kindIsValidInteger =
+    typeof kind === 'number' && Number.isInteger(kind) && kind >= 0;
+  if (!kindIsValidInteger) {
+    reasons.push('schema:invalid-kind');
+  } else if (kind !== INTERPRETATION_EVENT_KIND) {
+    reasons.push('schema:unsupported-kind');
+  }
+
+  if (
+    typeof createdAt !== 'number' ||
+    !Number.isInteger(createdAt) ||
+    createdAt <= 0
+  ) {
+    reasons.push('schema:invalid-created-at');
+  }
+
+  if (!isTagList(tags)) {
+    reasons.push('schema:invalid-tags');
+  }
+
+  if (typeof content !== 'string') {
+    reasons.push('schema:invalid-content');
+  }
+
+  if (reasons.length > 0) {
+    return { ok: false, reasons };
+  }
+
+  return {
+    ok: true,
+    candidate: {
+      kind: kind as number,
+      content: content as string,
+      tags: tags as readonly (readonly string[])[],
+      createdAt: createdAt as number,
+    },
+  };
+}
+
+/**
+ * An interpretation must reference at least one real ditto by id; a
+ * reference to an id that was never dittoed is a forged claim of subject
+ * matter the dimension doesn't actually have (CONTEXT.md — Interpretation).
+ */
+function checkSubjectReferences(
+  candidate: InterpretationCandidate,
+  dittoIds: ReadonlySet<string>
+): string | undefined {
+  const referencedIds = candidate.tags
+    .filter((tag) => tag[0] === 'e')
+    .map((tag) => tag[1]);
+
+  if (referencedIds.length === 0) {
+    return 'interpretation:missing-reference';
+  }
+
+  const forged = referencedIds.some(
+    (id) => id === undefined || !dittoIds.has(id)
+  );
+  return forged ? 'interpretation:forged-reference' : undefined;
+}
+
+/**
+ * The separation the ditto gate enforces one way, checked here the other:
+ * an interpretation must never carry a ditto's own source/resource tags —
+ * commentary can't pass itself off as a projection either
+ * (CONTEXT.md — Interpretation, Ditto).
+ */
+function checkNotDittoShaped(
+  candidate: InterpretationCandidate
+): string | undefined {
+  const carriesDittoTags = candidate.tags.some(
+    (tag) => tag[0] === 'source' || tag[0] === 'resource'
+  );
+  return carriesDittoTags ? 'interpretation:ditto-blend' : undefined;
+}
+
+function checkInterpretationContentSize(
+  candidate: InterpretationCandidate
+): string | undefined {
+  return candidate.content.length > MAX_CANDIDATE_CONTENT_LENGTH
+    ? 'content:oversized'
+    : undefined;
+}
+
+/**
+ * The NIP gate's interpretation counterpart: candidate in, verdict out.
+ * Every interpretation candidate — brain-authored commentary, never a
+ * ditto — still passes through a pure pre-publish gate before any paid
+ * write, same as the ditto loop (CONTEXT.md — Interpretation, NIP gate).
+ */
+export function evaluateInterpretation(
+  candidate: unknown,
+  dittoIds: ReadonlySet<string>
+): GateVerdict {
+  const schemaCheck = checkInterpretationSchema(candidate);
+  if (!schemaCheck.ok) {
+    return { ok: false, reasons: schemaCheck.reasons };
+  }
+
+  const reasons = [
+    checkSubjectReferences(schemaCheck.candidate, dittoIds),
+    checkNotDittoShaped(schemaCheck.candidate),
+    checkInterpretationContentSize(schemaCheck.candidate),
   ].filter((reason): reason is string => reason !== undefined);
 
   return reasons.length === 0 ? { ok: true } : { ok: false, reasons };

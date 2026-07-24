@@ -4,6 +4,7 @@ import type { BrainPort } from './ports/brain.js';
 import { plant } from './plant.js';
 import type { PlantRequest } from './plant.js';
 import { tick } from './tick.js';
+import { interpret } from './interpret.js';
 
 /**
  * Tracks packages/fractal/package.json's version — the CLI's own version
@@ -45,6 +46,10 @@ export async function runCommand(
 
   if (command === 'tick') {
     return runTick(rest, ports);
+  }
+
+  if (command === 'interpret') {
+    return runInterpret(rest, ports);
   }
 
   return {
@@ -154,6 +159,35 @@ async function runTick(
     const result = await tick(
       { mnemonic: parsed.mnemonic, index: parsed.index },
       { below: ports.below, relay: ports.relay }
+    );
+    const summary = {
+      published: result.published.length,
+      kickedBack: result.kickedBack,
+    };
+    const stdout = `${result.npub}\n${JSON.stringify(summary, null, 2)}\n`;
+    return { exitCode: 0, stdout, stderr: '' };
+  } catch (error) {
+    return {
+      exitCode: 1,
+      stdout: '',
+      stderr: `${error instanceof Error ? error.message : String(error)}\n`,
+    };
+  }
+}
+
+async function runInterpret(
+  argv: readonly string[],
+  ports: Ports
+): Promise<CommandResult> {
+  const parsed = parseMnemonicAndIndexFlags(argv, 'interpret');
+  if (!parsed.ok) {
+    return { exitCode: 1, stdout: '', stderr: parsed.error };
+  }
+
+  try {
+    const result = await interpret(
+      { mnemonic: parsed.mnemonic, index: parsed.index },
+      { relay: ports.relay, brain: ports.brain }
     );
     const summary = {
       published: result.published.length,

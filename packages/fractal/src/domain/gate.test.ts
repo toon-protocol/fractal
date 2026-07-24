@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateCandidate, MAX_CANDIDATE_CONTENT_LENGTH } from './gate.js';
-import type { CandidateEvent } from './event.js';
+import {
+  evaluateCandidate,
+  evaluateInterpretation,
+  MAX_CANDIDATE_CONTENT_LENGTH,
+} from './gate.js';
+import { INTERPRETATION_EVENT_KIND } from './event.js';
+import type { CandidateEvent, InterpretationCandidate } from './event.js';
 import type { DimensionSpec } from './spec.js';
 
 function spec(overrides: Partial<DimensionSpec> = {}): DimensionSpec {
@@ -258,5 +263,186 @@ describe('evaluateCandidate', () => {
         'content:oversized',
       ],
     });
+  });
+});
+
+function interpretationCandidate(
+  overrides: Partial<InterpretationCandidate> = {}
+): InterpretationCandidate {
+  return {
+    kind: INTERPRETATION_EVENT_KIND,
+    content: 'The dimension notices a wave of roguelike devlogs this week.',
+    tags: [['e', 'ditto-1']],
+    createdAt: 1_700_000_000,
+    ...overrides,
+  };
+}
+
+describe('evaluateInterpretation', () => {
+  const dittoIds = new Set(['ditto-1', 'ditto-2']);
+
+  it('passes a valid interpretation referencing a real ditto', () => {
+    expect(evaluateInterpretation(interpretationCandidate(), dittoIds)).toEqual(
+      { ok: true }
+    );
+  });
+
+  it('passes an interpretation referencing multiple real dittos', () => {
+    const result = evaluateInterpretation(
+      interpretationCandidate({
+        tags: [
+          ['e', 'ditto-1'],
+          ['e', 'ditto-2'],
+        ],
+      }),
+      dittoIds
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('performs no I/O — the verdict is available synchronously, not a promise', () => {
+    const verdict = evaluateInterpretation(interpretationCandidate(), dittoIds);
+    expect(verdict).not.toBeInstanceOf(Promise);
+  });
+
+  describe('bad schema', () => {
+    it('rejects a candidate that is not an object', () => {
+      expect(evaluateInterpretation(null, dittoIds)).toEqual({
+        ok: false,
+        reasons: ['schema:not-an-object'],
+      });
+    });
+
+    it('rejects a non-integer kind', () => {
+      const result = evaluateInterpretation(
+        interpretationCandidate({ kind: 1.5 }),
+        dittoIds
+      );
+      expect(result).toEqual({ ok: false, reasons: ['schema:invalid-kind'] });
+    });
+
+    it('rejects a ditto kind masquerading as an interpretation', () => {
+      const result = evaluateInterpretation(
+        interpretationCandidate({ kind: 1 }),
+        dittoIds
+      );
+      expect(result).toEqual({
+        ok: false,
+        reasons: ['schema:unsupported-kind'],
+      });
+    });
+
+    it('rejects a non-string content', () => {
+      const result = evaluateInterpretation(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        interpretationCandidate({ content: 42 as any }),
+        dittoIds
+      );
+      expect(result).toEqual({
+        ok: false,
+        reasons: ['schema:invalid-content'],
+      });
+    });
+
+    it('rejects tags that are not an array of non-empty string arrays', () => {
+      const result = evaluateInterpretation(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        interpretationCandidate({ tags: 'nope' as any }),
+        dittoIds
+      );
+      expect(result).toEqual({ ok: false, reasons: ['schema:invalid-tags'] });
+    });
+
+    it('rejects a non-positive createdAt', () => {
+      const result = evaluateInterpretation(
+        interpretationCandidate({ createdAt: 0 }),
+        dittoIds
+      );
+      expect(result).toEqual({
+        ok: false,
+        reasons: ['schema:invalid-created-at'],
+      });
+    });
+  });
+
+  it('kicks back an interpretation with no reference to any ditto', () => {
+    const result = evaluateInterpretation(
+      interpretationCandidate({ tags: [] }),
+      dittoIds
+    );
+    expect(result).toEqual({
+      ok: false,
+      reasons: ['interpretation:missing-reference'],
+    });
+  });
+
+  it('kicks back an interpretation referencing a ditto id that was never dittoed', () => {
+    const result = evaluateInterpretation(
+      interpretationCandidate({ tags: [['e', 'forged-ditto']] }),
+      dittoIds
+    );
+    expect(result).toEqual({
+      ok: false,
+      reasons: ['interpretation:forged-reference'],
+    });
+  });
+
+  it('rejects an interpretation that blends in ditto structure via source/resource tags', () => {
+    const result = evaluateInterpretation(
+      interpretationCandidate({
+        tags: [
+          ['e', 'ditto-1'],
+          ['source', 'hn'],
+        ],
+      }),
+      dittoIds
+    );
+    expect(result).toEqual({
+      ok: false,
+      reasons: ['interpretation:ditto-blend'],
+    });
+  });
+
+  it('kicks back oversized commentary', () => {
+    const result = evaluateInterpretation(
+      interpretationCandidate({
+        content: 'a'.repeat(MAX_CANDIDATE_CONTENT_LENGTH + 1),
+      }),
+      dittoIds
+    );
+    expect(result).toEqual({ ok: false, reasons: ['content:oversized'] });
+  });
+
+  it('accumulates every distinct kick-back reason in a single verdict', () => {
+    const result = evaluateInterpretation(
+      interpretationCandidate({
+        content: 'a'.repeat(MAX_CANDIDATE_CONTENT_LENGTH + 1),
+        tags: [
+          ['e', 'forged-ditto'],
+          ['resource', 'https://hacker-news.example/api/item/1'],
+        ],
+      }),
+      dittoIds
+    );
+    expect(result).toEqual({
+      ok: false,
+      reasons: [
+        'interpretation:forged-reference',
+        'interpretation:ditto-blend',
+        'content:oversized',
+      ],
+    });
+  });
+
+  it('never mutates the candidate it is handed', () => {
+    const candidate = interpretationCandidate();
+    const frozen = JSON.parse(
+      JSON.stringify(candidate)
+    ) as InterpretationCandidate;
+    Object.freeze(frozen);
+    Object.freeze(frozen.tags);
+
+    expect(() => evaluateInterpretation(frozen, dittoIds)).not.toThrow();
+    expect(frozen).toEqual(candidate);
   });
 });
