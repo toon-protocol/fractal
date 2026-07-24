@@ -1,0 +1,16 @@
+# These barrels are append-only `export *`/re-export manifests: concurrent
+# PRs that each add a new module or symbol only conflict here because git's
+# default 3-way merge treats adjacent-line insertions as competing hunks,
+# even though "keep both lines" is always the correct resolution for an
+# unordered export list. `merge=union` is git's built-in driver for exactly
+# this — on a conflicting hunk it takes both sides instead of writing
+# conflict markers.
+#
+# Scope this to barrel files ONLY. Any file with real logic must never have
+# both sides of a conflict silently kept — see
+# packages/fractal/src/barrels.test.ts, which guards against the one
+# failure mode union merge introduces (both sides adding the identical line).
+packages/fractal/src/index.ts merge=union
+packages/fractal/src/domain/index.ts merge=union
+packages/fractal/src/ports/index.ts merge=union
+packages/fractal/src/fakes/index.ts merge=union
