@@ -13,7 +13,11 @@ export type {
   Provenance,
   GateVerdict,
 } from './domain/index.js';
-export { DEFAULT_RELAY_SET } from './domain/index.js';
+export {
+  DEFAULT_RELAY_SET,
+  evaluateCandidate,
+  MAX_CANDIDATE_CONTENT_LENGTH,
+} from './domain/index.js';
 
 export { deriveDimensionIdentity } from './identity.js';
 export type { DimensionIdentity } from './identity.js';
