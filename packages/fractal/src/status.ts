@@ -1,12 +1,13 @@
 import { deriveDimensionIdentity } from './identity.js';
 import type { DimensionSpec } from './domain/spec.js';
-import { SPEC_EVENT_KIND } from './plant.js';
+import {
+  readPlantedSpec,
+  readLatestParsedEvent,
+  dittoedResourceUrls,
+} from './relay-reads.js';
 import { TICK_REPORT_EVENT_KIND } from './tick.js';
 import type { TickReport } from './tick.js';
-import type { RelayPort, RelaySignedEvent } from './ports/relay.js';
-
-const SOURCE_TAG = 'source';
-const RESOURCE_TAG = 'resource';
+import type { RelayPort } from './ports/relay.js';
 
 export interface StatusRequest {
   readonly mnemonic: string;
@@ -34,16 +35,6 @@ export interface DimensionStatus {
   readonly budgetRemaining: number;
 }
 
-function latestEvent(
-  events: readonly RelaySignedEvent[]
-): RelaySignedEvent | undefined {
-  return events.reduce<RelaySignedEvent | undefined>(
-    (latest, event) =>
-      !latest || event.createdAt >= latest.createdAt ? event : latest,
-    undefined
-  );
-}
-
 /**
  * The gardening view: derives a dimension's forest status purely from the
  * relay — spec summary, per-source cursor positions, the last tick's
@@ -56,43 +47,23 @@ export async function status(
   ports: StatusPorts
 ): Promise<DimensionStatus> {
   const identity = deriveDimensionIdentity(request.mnemonic, request.index);
-
-  const specEvents = await ports.relay.readBack({
-    authors: [identity.pubkey],
-    kinds: [SPEC_EVENT_KIND],
-  });
-  const specEvent = latestEvent(specEvents);
-  if (!specEvent) {
-    throw new Error(
-      `fractal: dimension index ${request.index} (${identity.npub}) has not been planted yet — run \`fractal plant\` first`
-    );
-  }
-  const spec = JSON.parse(specEvent.content) as DimensionSpec;
+  const spec = await readPlantedSpec(ports.relay, identity, request.index);
 
   const cursors: SourceCursor[] = [];
   for (const source of spec.sources) {
-    const dittoedForSource = await ports.relay.readBack({
-      authors: [identity.pubkey],
-      tags: { [SOURCE_TAG]: [source.id] },
-    });
-    const dittoedResources = new Set(
-      dittoedForSource.flatMap((event) =>
-        event.tags
-          .filter((tag) => tag[0] === RESOURCE_TAG)
-          .map((tag) => tag[1] ?? '')
-      )
+    const dittoedResources = await dittoedResourceUrls(
+      ports.relay,
+      identity.pubkey,
+      source.id
     );
     cursors.push({ sourceId: source.id, dittoCount: dittoedResources.size });
   }
 
-  const reportEvents = await ports.relay.readBack({
-    authors: [identity.pubkey],
-    kinds: [TICK_REPORT_EVENT_KIND],
-  });
-  const latestReportEvent = latestEvent(reportEvents);
-  const lastTick = latestReportEvent
-    ? (JSON.parse(latestReportEvent.content) as TickReport)
-    : null;
+  const lastTick = await readLatestParsedEvent<TickReport>(
+    ports.relay,
+    identity.pubkey,
+    TICK_REPORT_EVENT_KIND
+  );
 
   return {
     index: request.index,

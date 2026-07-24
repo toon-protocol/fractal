@@ -17,17 +17,21 @@ import type {
 export class RelayPool implements RelayPort {
   constructor(private readonly relays: ReadonlyMap<string, RelayPort>) {}
 
+  private resolve(url: string): RelayPort {
+    const relay = this.relays.get(url);
+    if (!relay) {
+      throw new Error(
+        `fractal: relay pool has no connection for ${url} — every relay in the spec's relay set must be wired`
+      );
+    }
+    return relay;
+  }
+
   async publish(request: PublishRequest): Promise<PublishResult> {
     const results = await Promise.all(
-      request.relaySet.map((url) => {
-        const relay = this.relays.get(url);
-        if (!relay) {
-          throw new Error(
-            `fractal: relay pool has no connection for ${url} — every relay in the spec's relay set must be wired`
-          );
-        }
-        return relay.publish({ relaySet: [url], event: request.event });
-      })
+      request.relaySet.map((url) =>
+        this.resolve(url).publish({ relaySet: [url], event: request.event })
+      )
     );
     const fee = results.reduce((sum, result) => sum + result.fee, 0);
     return { relaySet: request.relaySet, eventId: request.event.id, fee };
@@ -40,15 +44,9 @@ export class RelayPool implements RelayPort {
    */
   async quoteFee(request: PublishRequest): Promise<number> {
     const quotes = await Promise.all(
-      request.relaySet.map((url) => {
-        const relay = this.relays.get(url);
-        if (!relay) {
-          throw new Error(
-            `fractal: relay pool has no connection for ${url} — every relay in the spec's relay set must be wired`
-          );
-        }
-        return relay.quoteFee({ relaySet: [url], event: request.event });
-      })
+      request.relaySet.map((url) =>
+        this.resolve(url).quoteFee({ relaySet: [url], event: request.event })
+      )
     );
     return quotes.reduce((sum, quote) => sum + quote, 0);
   }

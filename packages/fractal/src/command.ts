@@ -64,6 +64,25 @@ export async function runCommand(
   };
 }
 
+type ParsedIndex =
+  | { readonly ok: true; readonly index: number }
+  | { readonly ok: false; readonly error: string };
+
+/** Shared by every command that parses a `--index` value (plant, tick, status, ...). */
+function parseIndexValue(
+  raw: string | undefined,
+  commandName: string
+): ParsedIndex {
+  const index = Number(raw);
+  if (!Number.isInteger(index) || index < 0) {
+    return {
+      ok: false,
+      error: `fractal ${commandName}: --index must be a non-negative integer\n`,
+    };
+  }
+  return { ok: true, index };
+}
+
 type ParsedMnemonicAndIndex =
   | { readonly ok: true; readonly mnemonic: string; readonly index: number }
   | { readonly ok: false; readonly error: string };
@@ -97,15 +116,12 @@ function parseMnemonicAndIndexFlags(
       error: `fractal ${commandName}: --index is required\n`,
     };
   }
-  const index = Number(indexRaw);
-  if (!Number.isInteger(index) || index < 0) {
-    return {
-      ok: false,
-      error: `fractal ${commandName}: --index must be a non-negative integer\n`,
-    };
+  const parsedIndex = parseIndexValue(indexRaw, commandName);
+  if (!parsedIndex.ok) {
+    return parsedIndex;
   }
 
-  return { ok: true, mnemonic, index };
+  return { ok: true, mnemonic, index: parsedIndex.index };
 }
 
 type ParsedPlantArgs =
@@ -224,15 +240,11 @@ function parseStatusArgv(argv: readonly string[]): ParsedStatusArgs {
       mnemonic = argv[i + 1];
       i += 1;
     } else if (argv[i] === '--index') {
-      const raw = argv[i + 1];
-      const index = Number(raw);
-      if (!Number.isInteger(index) || index < 0) {
-        return {
-          ok: false,
-          error: 'fractal status: --index must be a non-negative integer\n',
-        };
+      const parsedIndex = parseIndexValue(argv[i + 1], 'status');
+      if (!parsedIndex.ok) {
+        return parsedIndex;
       }
-      indices.push(index);
+      indices.push(parsedIndex.index);
       i += 1;
     }
   }
