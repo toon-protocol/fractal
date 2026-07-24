@@ -1,0 +1,43 @@
+name: CI
+
+# The gate — the outer, authoritative check of record for every PR ref.
+# lint / typecheck / test / build (+ format:check), per the org factory
+# convention (toon-meta FACTORY.md). The in-loop sandcastle gates are
+# advisory; this run is the verdict.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: lint
+        run: pnpm lint
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      - name: test
+        run: pnpm test
+
+      - name: build
+        run: pnpm build
+
+      - name: format
+        run: pnpm format:check

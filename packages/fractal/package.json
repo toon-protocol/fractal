@@ -1,0 +1,23 @@
+{
+  "name": "@toon-protocol/fractal",
+  "version": "0.0.0",
+  "description": "Fractal hands: the deterministic CLI + library that grows fractal dimensions on TOON (plant, fund, tick, gate, publish, read-back). Bootstrap — see toon-meta#245.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "clean": "tsc -b --clean"
+  }
+}
