@@ -30,10 +30,23 @@ describe('InMemoryRelay', () => {
     expect(result).toEqual({
       relaySet: ['wss://a', 'wss://b'],
       eventId: 'event-1',
+      fee: 1,
     });
     expect(relay.eventsPublishedTo('wss://a')).toEqual([event]);
     expect(relay.eventsPublishedTo('wss://b')).toEqual([event]);
     expect(relay.eventsPublishedTo('wss://c')).toEqual([]);
+  });
+
+  it('charges a flat fee per publish, quoted identically before and after', async () => {
+    const relay = new InMemoryRelay({ feePerEvent: 7 });
+    const event = signedEvent();
+    const request = { relaySet: ['wss://a'], event };
+
+    const quoted = await relay.quoteFee(request);
+    const result = await relay.publish(request);
+
+    expect(quoted).toBe(7);
+    expect(result.fee).toBe(7);
   });
 
   it('reads back published events filtered by author, kind, and tag', async () => {

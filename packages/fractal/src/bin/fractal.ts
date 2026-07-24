@@ -15,6 +15,7 @@ const below: BelowPort = { fetch: () => notWired('Below') };
 const relay: RelayPort = {
   publish: () => notWired('Relay'),
   readBack: () => notWired('Relay'),
+  quoteFee: () => notWired('Relay'),
 };
 const brain: BrainPort = {
   compile: () => notWired('Brain'),

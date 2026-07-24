@@ -5,6 +5,7 @@ import { plant } from './plant.js';
 import type { PlantRequest } from './plant.js';
 import { tick } from './tick.js';
 import { interpret } from './interpret.js';
+import { status } from './status.js';
 
 /**
  * Tracks packages/fractal/package.json's version — the CLI's own version
@@ -52,11 +53,34 @@ export async function runCommand(
     return runInterpret(rest, ports);
   }
 
+  if (command === 'status') {
+    return runStatus(rest, ports);
+  }
+
   return {
     exitCode: 1,
     stdout: '',
     stderr: `fractal: unknown command "${command ?? ''}"\n`,
   };
+}
+
+type ParsedIndex =
+  | { readonly ok: true; readonly index: number }
+  | { readonly ok: false; readonly error: string };
+
+/** Shared by every command that parses a `--index` value (plant, tick, status, ...). */
+function parseIndexValue(
+  raw: string | undefined,
+  commandName: string
+): ParsedIndex {
+  const index = Number(raw);
+  if (!Number.isInteger(index) || index < 0) {
+    return {
+      ok: false,
+      error: `fractal ${commandName}: --index must be a non-negative integer\n`,
+    };
+  }
+  return { ok: true, index };
 }
 
 type ParsedMnemonicAndIndex =
@@ -92,15 +116,12 @@ function parseMnemonicAndIndexFlags(
       error: `fractal ${commandName}: --index is required\n`,
     };
   }
-  const index = Number(indexRaw);
-  if (!Number.isInteger(index) || index < 0) {
-    return {
-      ok: false,
-      error: `fractal ${commandName}: --index must be a non-negative integer\n`,
-    };
+  const parsedIndex = parseIndexValue(indexRaw, commandName);
+  if (!parsedIndex.ok) {
+    return parsedIndex;
   }
 
-  return { ok: true, mnemonic, index };
+  return { ok: true, mnemonic, index: parsedIndex.index };
 }
 
 type ParsedPlantArgs =
@@ -171,7 +192,10 @@ async function runTick(
     );
     const summary = {
       published: result.published.length,
+      feesPaid: result.feesPaid,
+      budgetRemaining: result.budgetRemaining,
       kickedBack: result.kickedBack,
+      withheld: result.withheld,
     };
     return `${result.npub}\n${JSON.stringify(summary, null, 2)}\n`;
   });
@@ -196,5 +220,61 @@ async function runInterpret(
       kickedBack: result.kickedBack,
     };
     return `${result.npub}\n${JSON.stringify(summary, null, 2)}\n`;
+  });
+}
+
+type ParsedStatusArgs =
+  | {
+      readonly ok: true;
+      readonly mnemonic: string;
+      readonly indices: readonly number[];
+    }
+  | { readonly ok: false; readonly error: string };
+
+/** `--index` may repeat — the operator's forest is every dimension index they name, zero or more. */
+function parseStatusArgv(argv: readonly string[]): ParsedStatusArgs {
+  let mnemonic: string | undefined;
+  const indices: number[] = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--mnemonic') {
+      mnemonic = argv[i + 1];
+      i += 1;
+    } else if (argv[i] === '--index') {
+      const parsedIndex = parseIndexValue(argv[i + 1], 'status');
+      if (!parsedIndex.ok) {
+        return parsedIndex;
+      }
+      indices.push(parsedIndex.index);
+      i += 1;
+    }
+  }
+
+  if (!mnemonic) {
+    return { ok: false, error: 'fractal status: --mnemonic is required\n' };
+  }
+
+  return { ok: true, mnemonic, indices };
+}
+
+async function runStatus(
+  argv: readonly string[],
+  ports: Ports
+): Promise<CommandResult> {
+  const parsed = parseStatusArgv(argv);
+  if (!parsed.ok) {
+    return { exitCode: 1, stdout: '', stderr: parsed.error };
+  }
+
+  return toCommandResult(async () => {
+    const dimensions = [];
+    for (const index of parsed.indices) {
+      dimensions.push(
+        await status(
+          { mnemonic: parsed.mnemonic, index },
+          { relay: ports.relay }
+        )
+      );
+    }
+    return `${JSON.stringify(dimensions, null, 2)}\n`;
   });
 }

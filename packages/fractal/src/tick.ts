@@ -1,15 +1,26 @@
 import { deriveDimensionIdentity, signEvent } from './identity.js';
 import { evaluateCandidate } from './domain/gate.js';
-import type { DimensionSpec } from './domain/spec.js';
 import { AdapterRegistry } from './adapters/registry.js';
 import { feedAdapter } from './adapters/feed.js';
-import { SPEC_EVENT_KIND } from './plant.js';
+import {
+  SOURCE_TAG,
+  RESOURCE_TAG,
+  readPlantedSpec,
+  readLatestParsedEvent,
+  dittoedResourceUrls,
+} from './relay-reads.js';
 import type { BelowPort } from './ports/below.js';
 import type { RelayPort, RelaySignedEvent } from './ports/relay.js';
 
-/** Tags a published ditto carries so a later tick can read back what a source has already dittoed. */
-const SOURCE_TAG = 'source';
-const RESOURCE_TAG = 'resource';
+/**
+ * The per-tick economics log: not a ditto or interpretation, so it never
+ * passes through the NIP gate — same exemption plant.ts's own identity
+ * events already carry. Its `spent` field is the running total of fees the
+ * ditto loop has paid across every tick, so budget enforcement is derived
+ * purely from relay read-back, never local state (CONTEXT.md — Ditto loop,
+ * "the relay is the state of record").
+ */
+export const TICK_REPORT_EVENT_KIND = 3302;
 
 const ADAPTERS = new AdapterRegistry();
 ADAPTERS.register(feedAdapter);
@@ -30,11 +41,30 @@ export interface TickKickBack {
   readonly reasons: readonly string[];
 }
 
+/** A gate-passed candidate that would have exceeded the budget cap — never published, never dropped. */
+export interface TickWithheld {
+  readonly sourceId: string;
+  readonly resourceUrl: string;
+}
+
+/** The tick's own economics report, persisted to the relay so a later tick or `fractal status` can read it back. */
+export interface TickReport {
+  readonly published: number;
+  readonly feesPaid: number;
+  readonly spent: number;
+  readonly budgetRemaining: number;
+  readonly kickedBack: readonly TickKickBack[];
+  readonly withheld: readonly TickWithheld[];
+}
+
 export interface TickResult {
   readonly pubkey: string;
   readonly npub: string;
   readonly published: readonly RelaySignedEvent[];
   readonly kickedBack: readonly TickKickBack[];
+  readonly withheld: readonly TickWithheld[];
+  readonly feesPaid: number;
+  readonly budgetRemaining: number;
 }
 
 /**
@@ -51,38 +81,30 @@ export async function tick(
   ports: TickPorts
 ): Promise<TickResult> {
   const identity = deriveDimensionIdentity(request.mnemonic, request.index);
+  const spec = await readPlantedSpec(ports.relay, identity, request.index);
 
-  const specEvents = await ports.relay.readBack({
-    authors: [identity.pubkey],
-    kinds: [SPEC_EVENT_KIND],
-    limit: 1,
-  });
-  const specEvent = specEvents[0];
-  if (!specEvent) {
-    throw new Error(
-      `fractal: dimension index ${request.index} (${identity.npub}) has not been planted yet — run \`fractal plant\` first`
-    );
-  }
-  const spec = JSON.parse(specEvent.content) as DimensionSpec;
+  const previousReport = await readLatestParsedEvent<TickReport>(
+    ports.relay,
+    identity.pubkey,
+    TICK_REPORT_EVENT_KIND
+  );
+  let spent = previousReport ? previousReport.spent : 0;
+  let budgetExhausted = spent >= spec.budgetCap;
+  let feesPaidThisTick = 0;
 
   const published: RelaySignedEvent[] = [];
   const kickedBack: TickKickBack[] = [];
+  const withheld: TickWithheld[] = [];
 
   for (const source of spec.sources) {
     const adapter = ADAPTERS.resolve(source.kind);
     const response = await adapter.fetch(source, ports.below);
     const candidates = adapter.project(response, source);
 
-    const dittoedForSource = await ports.relay.readBack({
-      authors: [identity.pubkey],
-      tags: { [SOURCE_TAG]: [source.id] },
-    });
-    const alreadyDittoed = new Set(
-      dittoedForSource.flatMap((event) =>
-        event.tags
-          .filter((tag) => tag[0] === RESOURCE_TAG)
-          .map((tag) => tag[1] ?? '')
-      )
+    const alreadyDittoed = await dittoedResourceUrls(
+      ports.relay,
+      identity.pubkey,
+      source.id
     );
 
     const newCandidates = candidates.filter(
@@ -100,6 +122,14 @@ export async function tick(
         continue;
       }
 
+      if (budgetExhausted) {
+        withheld.push({
+          sourceId: source.id,
+          resourceUrl: candidate.provenance.resourceUrl,
+        });
+        continue;
+      }
+
       const event = signEvent(identity, {
         kind: candidate.kind,
         content: candidate.content,
@@ -111,15 +141,50 @@ export async function tick(
         created_at: candidate.createdAt,
       });
 
+      const fee = await ports.relay.quoteFee({
+        relaySet: spec.relaySet,
+        event,
+      });
+      if (spent + fee > spec.budgetCap) {
+        budgetExhausted = true;
+        withheld.push({
+          sourceId: source.id,
+          resourceUrl: candidate.provenance.resourceUrl,
+        });
+        continue;
+      }
+
       await ports.relay.publish({ relaySet: spec.relaySet, event });
+      spent += fee;
+      feesPaidThisTick += fee;
       published.push(event);
     }
   }
+
+  const budgetRemaining = Math.max(spec.budgetCap - spent, 0);
+  const report: TickReport = {
+    published: published.length,
+    feesPaid: feesPaidThisTick,
+    spent,
+    budgetRemaining,
+    kickedBack,
+    withheld,
+  };
+  const reportEvent = signEvent(identity, {
+    kind: TICK_REPORT_EVENT_KIND,
+    content: JSON.stringify(report),
+    tags: [],
+    created_at: Math.floor(Date.now() / 1000),
+  });
+  await ports.relay.publish({ relaySet: spec.relaySet, event: reportEvent });
 
   return {
     pubkey: identity.pubkey,
     npub: identity.npub,
     published,
     kickedBack,
+    withheld,
+    feesPaid: feesPaidThisTick,
+    budgetRemaining,
   };
 }

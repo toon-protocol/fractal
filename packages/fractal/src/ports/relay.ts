@@ -22,6 +22,7 @@ export interface PublishRequest {
 export interface PublishResult {
   readonly relaySet: readonly string[];
   readonly eventId: string;
+  readonly fee: number;
 }
 
 export interface ReadBackQuery {
@@ -34,4 +35,11 @@ export interface ReadBackQuery {
 export interface RelayPort {
   publish(request: PublishRequest): Promise<PublishResult>;
   readBack(query: ReadBackQuery): Promise<readonly RelaySignedEvent[]>;
+  /**
+   * Previews the fee a `publish` of this exact request would charge, so a
+   * caller can check a budget cap before spending (CONTEXT.md — Dimension
+   * identity, "budget cap is the channel balance"). Must agree with the fee
+   * `publish` actually reports for the same request.
+   */
+  quoteFee(request: PublishRequest): Promise<number>;
 }

@@ -6,6 +6,11 @@ import type {
   RelaySignedEvent,
 } from '../ports/relay.js';
 
+export interface InMemoryRelayOptions {
+  /** Flat fee charged per publish, standing in for a real relay's fee schedule. Defaults to 1. */
+  readonly feePerEvent?: number;
+}
+
 /**
  * Relay fake: publish appends signed events, read-back queries by
  * author/kind/tag. Doubles as the seam for cursor derivation, resume, and
@@ -15,6 +20,11 @@ import type {
 export class InMemoryRelay implements RelayPort {
   private readonly events: RelaySignedEvent[] = [];
   private readonly perRelay = new Map<string, RelaySignedEvent[]>();
+  private readonly feePerEvent: number;
+
+  constructor(options: InMemoryRelayOptions = {}) {
+    this.feePerEvent = options.feePerEvent ?? 1;
+  }
 
   async publish(request: PublishRequest): Promise<PublishResult> {
     this.events.push(request.event);
@@ -26,12 +36,20 @@ export class InMemoryRelay implements RelayPort {
         this.perRelay.set(relay, [request.event]);
       }
     }
-    return { relaySet: request.relaySet, eventId: request.event.id };
+    return {
+      relaySet: request.relaySet,
+      eventId: request.event.id,
+      fee: this.feePerEvent,
+    };
   }
 
   async readBack(query: ReadBackQuery): Promise<readonly RelaySignedEvent[]> {
     const matches = this.events.filter((event) => matchesQuery(event, query));
     return query.limit === undefined ? matches : matches.slice(0, query.limit);
+  }
+
+  async quoteFee(_request: PublishRequest): Promise<number> {
+    return this.feePerEvent;
   }
 
   eventsPublishedTo(relay: string): readonly RelaySignedEvent[] {
