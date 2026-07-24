@@ -42,6 +42,7 @@ import { execFileSync } from "node:child_process";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { sandboxSecrets } from "./sandbox-secrets.ts";
+import { openPrWithRetry } from "./pr-open.ts";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -202,75 +203,44 @@ try {
       );
     }
 
-    const alreadyOpen = JSON.parse(
-      execFileSync(
-        "gh",
-        ["pr", "list", "--head", branch, "--state", "open", "--json", "number"],
-        { encoding: "utf8" },
-      ),
-    ) as Array<{ number: number }>;
-    if (alreadyOpen.length === 0) {
-      const body =
-        "Produced by the sandcastle `agent:implement` runner; awaiting human " +
-        `review.\n\nCloses #${issueNumber}\n\n` +
-        "🤖 Generated with [Claude Code](https://claude.com/claude-code)";
-      execFileSync(
-        "gh",
-        ["pr", "create", "--base", "main", "--head", branch, "--title", issueTitle, "--body", body],
-        { stdio: "inherit" },
-      );
-    }
-    // FAIL LOUD. The open-pr phase logs COMPLETE from the prompt regardless of
-    // whether the in-sandbox `git push` / `gh pr create` actually succeeded, so
-    // we must NOT trust it. Verify from the HOST (whose `gh` is authenticated
-    // via GH_TOKEN) that an OPEN PR now exists for this branch. If not, dump the
-    // push/PR state and exit non-zero so the Actions job FAILS instead of
-    // green-lying (store#50: implementer committed, but push failed silently and
-    // no PR was ever created, yet the job went green).
-    const openPrs = JSON.parse(
-      execFileSync(
-        "gh",
-        ["pr", "list", "--head", branch, "--state", "open", "--json", "number,url"],
-        { encoding: "utf8" },
-      ),
-    ) as Array<{ number: number; url: string }>;
+    // Bounded retry + idempotency (fractal#22) — see pr-open.ts for the full
+    // rationale: a transient GitHub API failure here must not discard the
+    // already-pushed, already-reviewed branch.
+    const body =
+      "Produced by the sandcastle `agent:implement` runner; awaiting human " +
+      `review.\n\nCloses #${issueNumber}\n\n` +
+      "🤖 Generated with [Claude Code](https://claude.com/claude-code)";
 
-    if (openPrs.length > 0) {
-      const pr = openPrs[0]!;
-      console.log(`\nVerified: PR #${pr.number} is open — ${pr.url}`);
+    const openPr = await openPrWithRetry({
+      branch,
+      base: "main",
+      title: issueTitle,
+      body,
+      run: (args) => execFileSync("gh", args, { encoding: "utf8" }),
+      log: (message) => console.log(message),
+    });
+
+    if (openPr.ok) {
+      console.log(
+        `\nVerified: PR #${openPr.pr.number} is open — ${openPr.pr.url}`,
+      );
       console.log("Awaiting human review.");
     } else {
-      // No open PR. Gather diagnostics (all via the authenticated host `gh`).
-      const nwo = execFileSync(
-        "gh",
-        ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-        { encoding: "utf8" },
-      ).trim();
-
-      let branchPushed = false;
-      try {
-        execFileSync("gh", ["api", `repos/${nwo}/git/ref/heads/${branch}`], {
-          stdio: "pipe",
-        });
-        branchPushed = true;
-      } catch {
-        branchPushed = false;
-      }
-
-      const anyStatePrs = execFileSync(
-        "gh",
-        ["pr", "list", "--head", branch, "--state", "all", "--json", "number,state,url"],
-        { encoding: "utf8" },
-      ).trim();
-
+      // FAIL LOUD, but do not lose anything: the branch is pushed and the
+      // implement+review cycle already completed. Name the branch and hand
+      // back the exact recovery command instead of silently green-lying
+      // (store#50) or discarding a completed cycle over one API blip
+      // (fractal#22).
       openPrVerificationError =
-        `\nERROR: the open-pr phase reported COMPLETE, but no OPEN PR exists ` +
-        `for branch '${branch}'.\n` +
-        `  Remote branch pushed to origin: ${branchPushed}\n` +
-        `  PRs for this branch (any state): ${anyStatePrs}\n` +
-        `  The in-sandbox \`git push\` and/or \`gh pr create\` failed ` +
-        `silently. Inspect the open-pr phase logs above. The Actions job is ` +
-        `failing deliberately so this is not mistaken for success.`;
+        `\nERROR: gh pr create did not succeed for branch '${branch}' after ` +
+        `exhausting retries.\n` +
+        `  The branch IS pushed to origin and the implement+review cycle ` +
+        `completed successfully — nothing is lost.\n` +
+        `  Re-run this exact command once GitHub recovers:\n` +
+        `    ${openPr.recoveryCommand}\n` +
+        `  (Or just re-run this job: the branch is reused, and the ` +
+        `idempotency check will pick up a PR that may have landed ` +
+        `server-side despite the error.)`;
     }
   }
 } finally {
