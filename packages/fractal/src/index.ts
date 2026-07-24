@@ -13,6 +13,10 @@ export type {
   Provenance,
   GateVerdict,
 } from './domain/index.js';
+export {
+  evaluateCandidate,
+  MAX_CANDIDATE_CONTENT_LENGTH,
+} from './domain/index.js';
 
 export type {
   BelowPort,
