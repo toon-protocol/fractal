@@ -26,3 +26,10 @@ export interface DimensionSpec {
   readonly budgetCap: number;
   readonly relaySet: readonly string[];
 }
+
+/**
+ * The shared TOON relay a dimension's spec falls back to when the brain
+ * compiles no relay set of its own, so dimensions are social and discoverable
+ * by default (CONTEXT.md — Relay set).
+ */
+export const DEFAULT_RELAY_SET: readonly string[] = ['wss://relay.toon.social'];
