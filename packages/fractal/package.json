@@ -12,6 +12,9 @@
       "default": "./dist/index.js"
     }
   },
+  "bin": {
+    "fractal": "./dist/bin/fractal.js"
+  },
   "files": [
     "dist"
   ],
