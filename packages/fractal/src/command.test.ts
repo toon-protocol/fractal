@@ -225,6 +225,20 @@ describe('runCommand (black-box command layer)', () => {
       expect(second.stdout).toContain('"kickedBack": []');
     });
 
+    it('reports fees paid and budget remaining alongside published/kicked-back counts', async () => {
+      const { ports } = await plantedPorts(22);
+
+      const result = await runCommand(
+        ['tick', '--mnemonic', MNEMONIC, '--index', '22'],
+        ports
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('"feesPaid"');
+      expect(result.stdout).toContain('"budgetRemaining"');
+      expect(result.stdout).toContain('"withheld": []');
+    });
+
     it('rejects ticking a dimension that has not been planted', async () => {
       const { ports } = fakedPorts();
 
@@ -347,6 +361,127 @@ describe('runCommand (black-box command layer)', () => {
       const { ports, relay } = fakedPorts();
 
       const result = await runCommand(['interpret', '--index', '0'], ports);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/--mnemonic/i);
+      expect(await relay.readBack({})).toEqual([]);
+    });
+  });
+
+  describe('status', () => {
+    const HN_PAYLOAD = [
+      {
+        id: 41,
+        title: 'Show HN: fractal',
+        url: 'https://hacker-news.example/items/41',
+        by: 'pg',
+        time: 1_784_000_000,
+      },
+    ];
+
+    it('renders an empty forest when no --index is given', async () => {
+      const { ports } = fakedPorts();
+
+      const result = await runCommand(
+        ['status', '--mnemonic', MNEMONIC],
+        ports
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(JSON.parse(result.stdout)).toEqual([]);
+    });
+
+    it('renders a single planted dimension', async () => {
+      const { ports } = fakedPorts({ compile: () => compiledSpec });
+      const identity = deriveDimensionIdentity(MNEMONIC, 70);
+      await runCommand(
+        [
+          'plant',
+          'indie game dev scene',
+          '--mnemonic',
+          MNEMONIC,
+          '--index',
+          '70',
+        ],
+        ports
+      );
+
+      const result = await runCommand(
+        ['status', '--mnemonic', MNEMONIC, '--index', '70'],
+        ports
+      );
+
+      expect(result.exitCode).toBe(0);
+      const dimensions = JSON.parse(result.stdout);
+      expect(dimensions).toHaveLength(1);
+      expect(dimensions[0].npub).toBe(identity.npub);
+      expect(dimensions[0].spec.budgetCap).toBe(compiledSpec.budgetCap);
+      expect(dimensions[0].lastTick).toBeNull();
+    });
+
+    it('renders several dimensions, each reflecting its own tick outcome', async () => {
+      const relay = new InMemoryRelay();
+      const below = new FixtureBelow({
+        fixtures: { [`hn:${FEED_RESOURCE}`]: HN_PAYLOAD },
+      });
+      const ports: Ports = {
+        below,
+        relay,
+        brain: new ScriptedBrain({ compile: () => compiledSpec }),
+      };
+      const identity80 = deriveDimensionIdentity(MNEMONIC, 80);
+      const identity81 = deriveDimensionIdentity(MNEMONIC, 81);
+
+      for (const index of [80, 81]) {
+        await runCommand(
+          [
+            'plant',
+            'indie game dev scene',
+            '--mnemonic',
+            MNEMONIC,
+            '--index',
+            String(index),
+          ],
+          ports
+        );
+      }
+      await runCommand(
+        ['tick', '--mnemonic', MNEMONIC, '--index', '80'],
+        ports
+      );
+      // Index 81 was planted but never ticked.
+
+      const result = await runCommand(
+        ['status', '--mnemonic', MNEMONIC, '--index', '80', '--index', '81'],
+        ports
+      );
+
+      expect(result.exitCode).toBe(0);
+      const dimensions = JSON.parse(result.stdout);
+      expect(dimensions).toHaveLength(2);
+      expect(dimensions[0].npub).toBe(identity80.npub);
+      expect(dimensions[0].lastTick).not.toBeNull();
+      expect(dimensions[1].npub).toBe(identity81.npub);
+      expect(dimensions[1].lastTick).toBeNull();
+    });
+
+    it('rejects status for an unplanted index with a clear error', async () => {
+      const { ports } = fakedPorts();
+
+      const result = await runCommand(
+        ['status', '--mnemonic', MNEMONIC, '--index', '90'],
+        ports
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/not been planted/i);
+    });
+
+    it('rejects missing --mnemonic without touching any port', async () => {
+      const { ports, relay } = fakedPorts();
+
+      const result = await runCommand(['status', '--index', '0'], ports);
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toMatch(/--mnemonic/i);

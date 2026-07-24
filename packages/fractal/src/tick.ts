@@ -11,6 +11,16 @@ import type { RelayPort, RelaySignedEvent } from './ports/relay.js';
 const SOURCE_TAG = 'source';
 const RESOURCE_TAG = 'resource';
 
+/**
+ * The per-tick economics log: not a ditto or interpretation, so it never
+ * passes through the NIP gate — same exemption plant.ts's own identity
+ * events already carry. Its `spent` field is the running total of fees the
+ * ditto loop has paid across every tick, so budget enforcement is derived
+ * purely from relay read-back, never local state (CONTEXT.md — Ditto loop,
+ * "the relay is the state of record").
+ */
+export const TICK_REPORT_EVENT_KIND = 3302;
+
 const ADAPTERS = new AdapterRegistry();
 ADAPTERS.register(feedAdapter);
 
@@ -30,11 +40,46 @@ export interface TickKickBack {
   readonly reasons: readonly string[];
 }
 
+/** A gate-passed candidate that would have exceeded the budget cap — never published, never dropped. */
+export interface TickWithheld {
+  readonly sourceId: string;
+  readonly resourceUrl: string;
+}
+
+/** The tick's own economics report, persisted to the relay so a later tick or `fractal status` can read it back. */
+export interface TickReport {
+  readonly published: number;
+  readonly feesPaid: number;
+  readonly spent: number;
+  readonly budgetRemaining: number;
+  readonly kickedBack: readonly TickKickBack[];
+  readonly withheld: readonly TickWithheld[];
+}
+
 export interface TickResult {
   readonly pubkey: string;
   readonly npub: string;
   readonly published: readonly RelaySignedEvent[];
   readonly kickedBack: readonly TickKickBack[];
+  readonly withheld: readonly TickWithheld[];
+  readonly feesPaid: number;
+  readonly budgetRemaining: number;
+}
+
+/**
+ * Latest-by-createdAt wins — the relay may hold more than one event of a
+ * kind (e.g. successive tick reports). Same-second ties (routine within a
+ * single test or a fast heartbeat) break toward the later element of
+ * `events`, since read-back preserves publish order.
+ */
+function latestEvent(
+  events: readonly RelaySignedEvent[]
+): RelaySignedEvent | undefined {
+  return events.reduce<RelaySignedEvent | undefined>(
+    (latest, event) =>
+      !latest || event.createdAt >= latest.createdAt ? event : latest,
+    undefined
+  );
 }
 
 /**
@@ -55,9 +100,8 @@ export async function tick(
   const specEvents = await ports.relay.readBack({
     authors: [identity.pubkey],
     kinds: [SPEC_EVENT_KIND],
-    limit: 1,
   });
-  const specEvent = specEvents[0];
+  const specEvent = latestEvent(specEvents);
   if (!specEvent) {
     throw new Error(
       `fractal: dimension index ${request.index} (${identity.npub}) has not been planted yet — run \`fractal plant\` first`
@@ -65,8 +109,20 @@ export async function tick(
   }
   const spec = JSON.parse(specEvent.content) as DimensionSpec;
 
+  const reportEvents = await ports.relay.readBack({
+    authors: [identity.pubkey],
+    kinds: [TICK_REPORT_EVENT_KIND],
+  });
+  const previousReport = latestEvent(reportEvents);
+  let spent = previousReport
+    ? (JSON.parse(previousReport.content) as TickReport).spent
+    : 0;
+  let budgetExhausted = spent >= spec.budgetCap;
+  let feesPaidThisTick = 0;
+
   const published: RelaySignedEvent[] = [];
   const kickedBack: TickKickBack[] = [];
+  const withheld: TickWithheld[] = [];
 
   for (const source of spec.sources) {
     const adapter = ADAPTERS.resolve(source.kind);
@@ -100,6 +156,14 @@ export async function tick(
         continue;
       }
 
+      if (budgetExhausted) {
+        withheld.push({
+          sourceId: source.id,
+          resourceUrl: candidate.provenance.resourceUrl,
+        });
+        continue;
+      }
+
       const event = signEvent(identity, {
         kind: candidate.kind,
         content: candidate.content,
@@ -111,15 +175,50 @@ export async function tick(
         created_at: candidate.createdAt,
       });
 
+      const fee = await ports.relay.quoteFee({
+        relaySet: spec.relaySet,
+        event,
+      });
+      if (spent + fee > spec.budgetCap) {
+        budgetExhausted = true;
+        withheld.push({
+          sourceId: source.id,
+          resourceUrl: candidate.provenance.resourceUrl,
+        });
+        continue;
+      }
+
       await ports.relay.publish({ relaySet: spec.relaySet, event });
+      spent += fee;
+      feesPaidThisTick += fee;
       published.push(event);
     }
   }
+
+  const budgetRemaining = Math.max(spec.budgetCap - spent, 0);
+  const report: TickReport = {
+    published: published.length,
+    feesPaid: feesPaidThisTick,
+    spent,
+    budgetRemaining,
+    kickedBack,
+    withheld,
+  };
+  const reportEvent = signEvent(identity, {
+    kind: TICK_REPORT_EVENT_KIND,
+    content: JSON.stringify(report),
+    tags: [],
+    created_at: Math.floor(Date.now() / 1000),
+  });
+  await ports.relay.publish({ relaySet: spec.relaySet, event: reportEvent });
 
   return {
     pubkey: identity.pubkey,
     npub: identity.npub,
     published,
     kickedBack,
+    withheld,
+    feesPaid: feesPaidThisTick,
+    budgetRemaining,
   };
 }

@@ -40,10 +40,30 @@ describe('RelayPool', () => {
     expect(result).toEqual({
       relaySet: ['wss://a', 'wss://b', 'wss://c'],
       eventId: 'event-1',
+      fee: 3,
     });
     expect(relayA.eventsPublishedTo('wss://a')).toEqual([event]);
     expect(relayB.eventsPublishedTo('wss://b')).toEqual([event]);
     expect(relayC.eventsPublishedTo('wss://c')).toEqual([event]);
+  });
+
+  it('quotes and charges the sum of every named relay fee', async () => {
+    const relayA = new InMemoryRelay({ feePerEvent: 2 });
+    const relayB = new InMemoryRelay({ feePerEvent: 5 });
+    const pool = new RelayPool(
+      new Map([
+        ['wss://a', relayA],
+        ['wss://b', relayB],
+      ])
+    );
+    const event = signedEvent();
+    const request = { relaySet: ['wss://a', 'wss://b'], event };
+
+    const quoted = await pool.quoteFee(request);
+    const result = await pool.publish(request);
+
+    expect(quoted).toBe(7);
+    expect(result.fee).toBe(7);
   });
 
   it('does not reach a relay left out of the relay set', async () => {
@@ -117,8 +137,10 @@ describe('RelayPool', () => {
         Promise.resolve({
           relaySet: request.relaySet,
           eventId: request.event.id,
+          fee: 1,
         }),
       readBack: () => Promise.reject(new Error('relay unreachable')),
+      quoteFee: () => Promise.resolve(1),
     };
     const pool = new RelayPool(
       new Map([

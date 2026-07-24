@@ -5,6 +5,7 @@ export * from './identity.js';
 export * from './plant.js';
 export * from './tick.js';
 export * from './interpret.js';
+export * from './status.js';
 export * from './relay-pool.js';
 export * from './ports/index.js';
 export * from './fakes/index.js';
