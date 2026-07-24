@@ -134,46 +134,43 @@ function checkSchema(input: unknown): SchemaCheck {
  */
 function checkProvenance(
   candidate: CandidateEvent,
-  spec: DimensionSpec,
-  reasons: string[]
-): void {
+  spec: DimensionSpec
+): string | undefined {
   const { sourceId, resourceUrl, fetchedAt } = candidate.provenance;
 
-  const isComplete =
+  const isWellFormed =
     sourceId.trim() !== '' &&
     resourceUrl.trim() !== '' &&
     fetchedAt.trim() !== '' &&
     !Number.isNaN(Date.parse(fetchedAt));
 
-  if (!isComplete) {
-    reasons.push('provenance:missing');
-    return;
+  if (!isWellFormed) {
+    return 'provenance:missing';
   }
 
   const source = spec.sources.find(
     (candidateSource) => candidateSource.id === sourceId
   );
   if (!source || !resourceUrl.startsWith(source.endpoint)) {
-    reasons.push('provenance:forged-source');
+    return 'provenance:forged-source';
   }
+
+  return undefined;
 }
 
 /** The dimension's spec, not just the gate's own schema, bounds which kinds may publish. */
 function checkKindAllowed(
   candidate: CandidateEvent,
-  spec: DimensionSpec,
-  reasons: string[]
-): void {
+  spec: DimensionSpec
+): string | undefined {
   const allowedKinds = new Set(spec.nipMappings.map((mapping) => mapping.kind));
-  if (!allowedKinds.has(candidate.kind)) {
-    reasons.push('spec:kind-not-allowed');
-  }
+  return allowedKinds.has(candidate.kind) ? undefined : 'spec:kind-not-allowed';
 }
 
-function checkContentSize(candidate: CandidateEvent, reasons: string[]): void {
-  if (candidate.content.length > MAX_CANDIDATE_CONTENT_LENGTH) {
-    reasons.push('content:oversized');
-  }
+function checkContentSize(candidate: CandidateEvent): string | undefined {
+  return candidate.content.length > MAX_CANDIDATE_CONTENT_LENGTH
+    ? 'content:oversized'
+    : undefined;
 }
 
 /**
@@ -184,13 +181,10 @@ function checkContentSize(candidate: CandidateEvent, reasons: string[]): void {
  * detectable without reading content.
  */
 function checkDittoInterpretationSeparation(
-  candidate: CandidateEvent,
-  reasons: string[]
-): void {
+  candidate: CandidateEvent
+): string | undefined {
   const referencesAnotherEvent = candidate.tags.some((tag) => tag[0] === 'e');
-  if (referencesAnotherEvent) {
-    reasons.push('ditto:interpretation-blend');
-  }
+  return referencesAnotherEvent ? 'ditto:interpretation-blend' : undefined;
 }
 
 /**
@@ -207,11 +201,12 @@ export function evaluateCandidate(
     return { ok: false, reasons: schemaCheck.reasons };
   }
 
-  const reasons: string[] = [];
-  checkKindAllowed(schemaCheck.candidate, spec, reasons);
-  checkProvenance(schemaCheck.candidate, spec, reasons);
-  checkContentSize(schemaCheck.candidate, reasons);
-  checkDittoInterpretationSeparation(schemaCheck.candidate, reasons);
+  const reasons = [
+    checkKindAllowed(schemaCheck.candidate, spec),
+    checkProvenance(schemaCheck.candidate, spec),
+    checkContentSize(schemaCheck.candidate),
+    checkDittoInterpretationSeparation(schemaCheck.candidate),
+  ].filter((reason): reason is string => reason !== undefined);
 
   return reasons.length === 0 ? { ok: true } : { ok: false, reasons };
 }
