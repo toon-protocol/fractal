@@ -14,6 +14,11 @@ NIP gate, relay set, portal) is the canonical language for names, docs, and comm
   narrow.
 - Prefix intentionally-unused bindings with `_`.
 - Formatting is Prettier (`prettier.config.js`) — do not hand-format; run `pnpm format`.
+- **Barrels are collision-resistant by construction.** A package's root `index.ts` re-exports
+  whole modules (`export * from './foo.js';`), one line per module — it never enumerates
+  individual symbols. New public symbols are exported from their nearest sub-barrel (e.g.
+  `domain/index.ts`, `ports/index.ts`) instead; that keeps concurrent feature PRs from appending
+  to the same shared lines in the root barrel and conflicting on merge.
 
 ## Domain invariants (the load-bearing rules)
 
