@@ -30,6 +30,9 @@ import type {
   StatusPorts,
   DimensionStatus,
   SourceCursor,
+  AmendRequest,
+  AmendPorts,
+  AmendResult,
   BelowPort,
   BelowRequest,
   BelowResponse,
@@ -56,6 +59,7 @@ import type {
 const EXPECTED_VALUE_EXPORTS = [
   'AdapterRegistry',
   'CLI_VERSION',
+  'amend',
   'DEFAULT_RELAY_SET',
   'FEED_RESOURCE',
   'FixtureBelow',

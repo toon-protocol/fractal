@@ -262,6 +262,248 @@ describe('runCommand (black-box command layer)', () => {
     });
   });
 
+  describe('amend', () => {
+    const HN_SOURCE = {
+      id: 'hn',
+      kind: 'hn',
+      endpoint: 'https://hacker-news.example/api',
+    };
+    const BLOG_SOURCE = {
+      id: 'blog',
+      kind: 'rss',
+      endpoint: 'https://blog.example/feed',
+    };
+    const HN_PAYLOAD = [
+      {
+        id: 41,
+        title: 'Show HN: fractal',
+        url: 'https://hacker-news.example/items/41',
+        by: 'pg',
+        time: 1_784_000_000,
+      },
+    ];
+    const BLOG_PAYLOAD = [
+      {
+        title: 'A devlog on roguelikes',
+        link: 'https://blog.example/posts/1',
+        author: 'jane',
+        pubDate: '2026-01-01T00:00:00Z',
+      },
+    ];
+
+    function specWith(overrides: Partial<DimensionSpec>): DimensionSpec {
+      return { ...compiledSpec, sources: [HN_SOURCE], ...overrides };
+    }
+
+    async function plantedPorts(
+      index: number,
+      spec: DimensionSpec = specWith({})
+    ): Promise<{ ports: Ports; relay: InMemoryRelay }> {
+      const relay = new InMemoryRelay();
+      const below = new FixtureBelow({
+        fixtures: {
+          [`hn:${FEED_RESOURCE}`]: HN_PAYLOAD,
+          [`blog:${FEED_RESOURCE}`]: BLOG_PAYLOAD,
+        },
+      });
+      const ports: Ports = {
+        below,
+        relay,
+        brain: new ScriptedBrain({ compile: () => spec }),
+      };
+      await runCommand(
+        [
+          'plant',
+          'indie game dev scene',
+          '--mnemonic',
+          MNEMONIC,
+          '--index',
+          String(index),
+        ],
+        ports
+      );
+      return { ports, relay };
+    }
+
+    it('amends the spec end-to-end; the next tick honors it — removed source stops producing, added source starts', async () => {
+      const { ports } = await plantedPorts(50);
+      const identity = deriveDimensionIdentity(MNEMONIC, 50);
+
+      const firstTick = await runCommand(
+        ['tick', '--mnemonic', MNEMONIC, '--index', '50'],
+        ports
+      );
+      expect(firstTick.stdout).toContain('"published": 1');
+
+      const amendedSpec = specWith({ sources: [BLOG_SOURCE] });
+      const amendResult = await runCommand(
+        [
+          'amend',
+          '--mnemonic',
+          MNEMONIC,
+          '--index',
+          '50',
+          '--spec',
+          JSON.stringify(amendedSpec),
+        ],
+        ports
+      );
+      expect(amendResult.exitCode).toBe(0);
+      expect(amendResult.stderr).toBe('');
+      expect(amendResult.stdout).toContain(identity.npub);
+
+      const secondTick = await runCommand(
+        ['tick', '--mnemonic', MNEMONIC, '--index', '50'],
+        ports
+      );
+      expect(secondTick.stdout).toContain('"published": 1');
+
+      const dittos = await ports.relay.readBack({
+        authors: [identity.pubkey],
+        kinds: [1],
+      });
+      expect(dittos).toHaveLength(2);
+      const resources = dittos.flatMap((event) =>
+        event.tags.filter((tag) => tag[0] === 'resource').map((tag) => tag[1])
+      );
+      expect(resources.some((url) => url?.includes('hacker-news'))).toBe(true);
+      expect(resources.some((url) => url?.includes('blog.example'))).toBe(true);
+
+      // A third tick against the amended (hn-less) spec produces nothing new
+      // for hn — the removed source stays stopped.
+      const thirdTick = await runCommand(
+        ['tick', '--mnemonic', MNEMONIC, '--index', '50'],
+        ports
+      );
+      expect(thirdTick.stdout).toContain('"published": 0');
+    });
+
+    it('raising the budget cap via amend unblocks previously withheld work on the next tick', async () => {
+      const relay = new InMemoryRelay({ feePerEvent: 1 });
+      const below = new FixtureBelow({
+        fixtures: {
+          [`hn:${FEED_RESOURCE}`]: HN_PAYLOAD,
+          [`blog:${FEED_RESOURCE}`]: BLOG_PAYLOAD,
+        },
+      });
+      const lowCapSpec = specWith({
+        sources: [HN_SOURCE, BLOG_SOURCE],
+        budgetCap: 1,
+      });
+      const ports: Ports = {
+        below,
+        relay,
+        brain: new ScriptedBrain({ compile: () => lowCapSpec }),
+      };
+      await runCommand(
+        [
+          'plant',
+          'indie game dev scene',
+          '--mnemonic',
+          MNEMONIC,
+          '--index',
+          '51',
+        ],
+        ports
+      );
+
+      const firstTick = await runCommand(
+        ['tick', '--mnemonic', MNEMONIC, '--index', '51'],
+        ports
+      );
+      expect(firstTick.stdout).toContain('"published": 1');
+      expect(firstTick.stdout).not.toContain('"withheld": []');
+
+      const raisedCapSpec = { ...lowCapSpec, budgetCap: 100 };
+      const amendResult = await runCommand(
+        [
+          'amend',
+          '--mnemonic',
+          MNEMONIC,
+          '--index',
+          '51',
+          '--spec',
+          JSON.stringify(raisedCapSpec),
+        ],
+        ports
+      );
+      expect(amendResult.exitCode).toBe(0);
+
+      const secondTick = await runCommand(
+        ['tick', '--mnemonic', MNEMONIC, '--index', '51'],
+        ports
+      );
+      expect(secondTick.stdout).toContain('"published": 1');
+      expect(secondTick.stdout).toContain('"withheld": []');
+    });
+
+    it('rejects amending a dimension that has not been planted', async () => {
+      const { ports } = fakedPorts();
+
+      const result = await runCommand(
+        [
+          'amend',
+          '--mnemonic',
+          MNEMONIC,
+          '--index',
+          '42',
+          '--spec',
+          JSON.stringify(compiledSpec),
+        ],
+        ports
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/not been planted/i);
+    });
+
+    it('rejects a missing --spec without touching any port', async () => {
+      const { ports } = await plantedPorts(52);
+
+      const result = await runCommand(
+        ['amend', '--mnemonic', MNEMONIC, '--index', '52'],
+        ports
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/--spec/i);
+    });
+
+    it('rejects malformed --spec JSON with a clear error', async () => {
+      const { ports } = await plantedPorts(53);
+
+      const result = await runCommand(
+        [
+          'amend',
+          '--mnemonic',
+          MNEMONIC,
+          '--index',
+          '53',
+          '--spec',
+          '{not json',
+        ],
+        ports
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/--spec/i);
+    });
+
+    it('rejects missing --mnemonic without touching any port', async () => {
+      const { ports, relay } = fakedPorts();
+      const before = await relay.readBack({});
+
+      const result = await runCommand(
+        ['amend', '--index', '0', '--spec', JSON.stringify(compiledSpec)],
+        ports
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/--mnemonic/i);
+      expect(await relay.readBack({})).toEqual(before);
+    });
+  });
+
   describe('interpret', () => {
     const HN_PAYLOAD = [
       {
