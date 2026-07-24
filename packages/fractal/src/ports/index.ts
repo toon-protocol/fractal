@@ -12,3 +12,4 @@ export type {
   InterpretRequest,
   AdaptRequest,
 } from './brain.js';
+export type { MediumAdapter } from './adapter.js';
