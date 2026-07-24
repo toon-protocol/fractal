@@ -203,13 +203,9 @@ try {
       );
     }
 
-    // Bounded retry + idempotency (fractal#22): a single transient GitHub API
-    // failure on this step must not discard the already-pushed, already-
-    // reviewed branch. openPrWithRetry checks for an existing PR (open OR
-    // closed) before every attempt — a 500 can mask a server-side success,
-    // and a blind retry would then 422 on "already exists" — and only gives
-    // up after exhausting backoff, handing back the exact command a human
-    // can re-run. It never touches, let alone deletes, the pushed branch.
+    // Bounded retry + idempotency (fractal#22) — see pr-open.ts for the full
+    // rationale: a transient GitHub API failure here must not discard the
+    // already-pushed, already-reviewed branch.
     const body =
       "Produced by the sandcastle `agent:implement` runner; awaiting human " +
       `review.\n\nCloses #${issueNumber}\n\n` +
@@ -224,7 +220,7 @@ try {
       log: (message) => console.log(message),
     });
 
-    if (openPr.ok && openPr.pr) {
+    if (openPr.ok) {
       console.log(
         `\nVerified: PR #${openPr.pr.number} is open — ${openPr.pr.url}`,
       );

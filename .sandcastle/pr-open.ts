@@ -35,12 +35,11 @@ export interface OpenPrParams {
   log?: (message: string) => void;
 }
 
-export interface OpenPrResult {
-  ok: boolean;
-  pr?: PullRequestRef;
-  /** Set only when `ok` is false: the exact command a human can re-run. */
-  recoveryCommand?: string;
-}
+/** `recoveryCommand` (present only when `ok` is false) is the exact command
+ * a human can re-run. */
+export type OpenPrResult =
+  | { ok: true; pr: PullRequestRef }
+  | { ok: false; recoveryCommand: string };
 
 export const DEFAULT_BACKOFF_MS = [2_000, 8_000, 30_000, 60_000, 120_000];
 

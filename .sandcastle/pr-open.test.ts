@@ -19,7 +19,7 @@ function existingPr(number: number, url: string): string {
 describe('openPrWithRetry', () => {
   it('succeeds on the first try', async () => {
     const run = vi
-      .fn<(args: string[]) => string>()
+      .fn<[string[]], string>()
       // pre-check: no existing PR
       .mockReturnValueOnce(noExisting())
       // gh pr create
@@ -53,7 +53,7 @@ describe('openPrWithRetry', () => {
 
   it('retries with backoff after transient failures, then succeeds', async () => {
     const run = vi
-      .fn<(args: string[]) => string>()
+      .fn<[string[]], string>()
       // attempt 1: no existing PR, create throws, still no PR after
       .mockReturnValueOnce(noExisting())
       .mockImplementationOnce(() => {
@@ -93,7 +93,7 @@ describe('openPrWithRetry', () => {
 
   it('is a no-op returning the existing PR when one is already open', async () => {
     const run = vi
-      .fn<(args: string[]) => string>()
+      .fn<[string[]], string>()
       .mockReturnValueOnce(existingPr(55, 'https://github.com/o/r/pull/55'));
     const sleep = vi.fn().mockResolvedValue(undefined);
 
@@ -114,7 +114,7 @@ describe('openPrWithRetry', () => {
   it('exits non-zero-worthy (ok: false) with a recovery command once all attempts are exhausted', async () => {
     const backoffMs = [2_000, 8_000];
     const run = vi
-      .fn<(args: string[]) => string>()
+      .fn<[string[]], string>()
       .mockImplementation((args) => {
         if (args[0] === 'pr' && args[1] === 'list') {
           return noExisting();
@@ -144,7 +144,7 @@ describe('openPrWithRetry', () => {
 
   it('treats a masked server-side success (create throws, but the PR is now findable) as success', async () => {
     const run = vi
-      .fn<(args: string[]) => string>()
+      .fn<[string[]], string>()
       // pre-check: nothing yet
       .mockReturnValueOnce(noExisting())
       // create throws (e.g. HTTP 500 with an empty body)
