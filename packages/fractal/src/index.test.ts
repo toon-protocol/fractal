@@ -15,6 +15,10 @@ import type {
   PlantRequest,
   PlantResult,
   PlantPorts,
+  TickRequest,
+  TickPorts,
+  TickResult,
+  TickKickBack,
   BelowPort,
   BelowRequest,
   BelowResponse,
@@ -57,6 +61,8 @@ const EXPECTED_VALUE_EXPORTS = [
   'fixtureKey',
   'plant',
   'runCommand',
+  'signEvent',
+  'tick',
 ].sort();
 
 describe('package root barrel', () => {

@@ -1,5 +1,8 @@
 import { accountFromSeedWords, validateWords } from 'nostr-tools/nip06';
 import { npubEncode } from 'nostr-tools/nip19';
+import { finalizeEvent } from 'nostr-tools/pure';
+import type { EventTemplate } from 'nostr-tools/pure';
+import type { RelaySignedEvent } from './ports/relay.js';
 
 /**
  * A dimension's nostr keypair, NIP-06-derived from the operator's master
@@ -33,5 +36,22 @@ export function deriveDimensionIdentity(
     privateKey,
     pubkey: publicKey,
     npub: npubEncode(publicKey),
+  };
+}
+
+/** Signs an event template with a dimension's derived key — every published fractal event goes through this. */
+export function signEvent(
+  identity: DimensionIdentity,
+  template: EventTemplate
+): RelaySignedEvent {
+  const finalized = finalizeEvent(template, identity.privateKey);
+  return {
+    id: finalized.id,
+    pubkey: finalized.pubkey,
+    kind: finalized.kind,
+    content: finalized.content,
+    tags: finalized.tags,
+    createdAt: finalized.created_at,
+    sig: finalized.sig,
   };
 }

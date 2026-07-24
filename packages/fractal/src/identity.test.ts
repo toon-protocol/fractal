@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { deriveDimensionIdentity } from './identity.js';
+import { verifyEvent } from 'nostr-tools/pure';
+import { deriveDimensionIdentity, signEvent } from './identity.js';
 
 const MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
@@ -31,5 +32,24 @@ describe('deriveDimensionIdentity', () => {
     expect(() => deriveDimensionIdentity('not a real mnemonic', 0)).toThrow(
       /BIP-39 validation/i
     );
+  });
+});
+
+describe('signEvent', () => {
+  it('signs an event template with the identity key, producing a verifiable event', () => {
+    const identity = deriveDimensionIdentity(MNEMONIC, 0);
+
+    const event = signEvent(identity, {
+      kind: 1,
+      content: 'hello',
+      tags: [['r', 'https://example.com']],
+      created_at: 1_700_000_000,
+    });
+
+    expect(event.pubkey).toBe(identity.pubkey);
+    expect(event.kind).toBe(1);
+    expect(event.content).toBe('hello');
+    expect(event.tags).toEqual([['r', 'https://example.com']]);
+    expect(verifyEvent({ ...event, created_at: event.createdAt })).toBe(true);
   });
 });
