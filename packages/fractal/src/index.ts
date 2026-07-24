@@ -13,6 +13,18 @@ export type {
   Provenance,
   GateVerdict,
 } from './domain/index.js';
+export { DEFAULT_RELAY_SET } from './domain/index.js';
+
+export { deriveDimensionIdentity } from './identity.js';
+export type { DimensionIdentity } from './identity.js';
+
+export {
+  plant,
+  PROFILE_EVENT_KIND,
+  SEED_EVENT_KIND,
+  SPEC_EVENT_KIND,
+} from './plant.js';
+export type { PlantRequest, PlantResult, PlantPorts } from './plant.js';
 
 export type {
   BelowPort,

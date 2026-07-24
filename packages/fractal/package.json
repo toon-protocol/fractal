@@ -22,5 +22,8 @@
     "build": "tsc -b",
     "typecheck": "tsc -b",
     "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "nostr-tools": "^2.24.1"
   }
 }
