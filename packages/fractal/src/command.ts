@@ -2,6 +2,7 @@ import type { BelowPort } from './ports/below.js';
 import type { RelayPort } from './ports/relay.js';
 import type { BrainPort } from './ports/brain.js';
 import { plant } from './plant.js';
+import type { PlantRequest } from './plant.js';
 
 /**
  * Tracks packages/fractal/package.json's version — the CLI's own version
@@ -48,14 +49,8 @@ export async function runCommand(
   };
 }
 
-interface PlantArgs {
-  readonly utterance: string;
-  readonly mnemonic: string;
-  readonly index: number;
-}
-
 type ParsedPlantArgs =
-  | { readonly ok: true; readonly args: PlantArgs }
+  | { readonly ok: true; readonly args: PlantRequest }
   | { readonly ok: false; readonly error: string };
 
 function parsePlantArgv(argv: readonly string[]): ParsedPlantArgs {
@@ -103,14 +98,7 @@ async function runPlant(
   }
 
   try {
-    const result = await plant(
-      {
-        utterance: parsed.args.utterance,
-        mnemonic: parsed.args.mnemonic,
-        index: parsed.args.index,
-      },
-      ports
-    );
+    const result = await plant(parsed.args, ports);
     const stdout = `${result.npub}\n${JSON.stringify(result.spec, null, 2)}\n`;
     return { exitCode: 0, stdout, stderr: '' };
   } catch (error) {
