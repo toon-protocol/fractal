@@ -8,7 +8,7 @@
 #
 # Scope this to barrel files ONLY. Any file with real logic must never have
 # both sides of a conflict silently kept — see
-# packages/fractal/src/barrel-lines.test.ts, which guards against the one
+# packages/fractal/src/barrels.test.ts, which guards against the one
 # failure mode union merge introduces (both sides adding the identical line).
 packages/fractal/src/index.ts merge=union
 packages/fractal/src/domain/index.ts merge=union
