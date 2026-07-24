@@ -31,41 +31,11 @@ import type {
   BrainScript,
 } from './index.js';
 
-// Compile-time proof that every type symbol below is still exported from the
-// root barrel, with the same name. This array is never read at runtime; its
-// only job is to fail `tsc` if a type goes missing during a barrel refactor.
-type ExportedTypesStillPresent = [
-  PipelineStage,
-  Ports,
-  CommandResult,
-  Seed,
-  DimensionSpec,
-  SourceConfig,
-  NipMapping,
-  CandidateEvent,
-  Provenance,
-  GateVerdict,
-  DimensionIdentity,
-  PlantRequest,
-  PlantResult,
-  PlantPorts,
-  BelowPort,
-  BelowRequest,
-  BelowResponse,
-  RelayPort,
-  RelaySignedEvent,
-  PublishRequest,
-  PublishResult,
-  ReadBackQuery,
-  BrainPort,
-  CompileRequest,
-  InterpretRequest,
-  AdaptRequest,
-  FixtureBelowOptions,
-  BrainScript,
-];
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-type _Assert = ExportedTypesStillPresent;
+// The `import type { ... }` above is itself the guard: if a type is renamed
+// or dropped from the root barrel, this file fails to resolve it. Note that
+// packages/fractal/tsconfig.json excludes `*.test.ts` from `tsc -b`, so that
+// failure only surfaces in editor tooling, not in `pnpm typecheck`/CI — the
+// value-export check below is the one regression guard CI actually runs.
 
 const EXPECTED_VALUE_EXPORTS = [
   'CLI_VERSION',
