@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { tick } from './tick.js';
 import { plant } from './plant.js';
+import { amend } from './amend.js';
 import { RelayPool } from './relay-pool.js';
 import { InMemoryRelay } from './fakes/in-memory-relay.js';
 import { FixtureBelow } from './fakes/fixture-below.js';
@@ -163,5 +164,86 @@ describe('cold resume', () => {
     );
 
     expect(resumed.published).toEqual([]);
+  });
+
+  it('cold resume after an amendment resumes under the amended spec', async () => {
+    const BLOG_SOURCE: SourceConfig = {
+      id: 'blog',
+      kind: 'rss',
+      endpoint: 'https://blog.example/feed',
+    };
+    const BLOG_PAYLOAD = [
+      {
+        title: 'A devlog on roguelikes',
+        link: 'https://blog.example/posts/1',
+        author: 'jane',
+        pubDate: '2026-01-01T00:00:00Z',
+      },
+    ];
+
+    const relayConnections = new Map([
+      ['wss://relay-one.example', new InMemoryRelay()],
+    ]);
+    const relayList = [...relayConnections.keys()];
+    const index = 32;
+    const brain = new ScriptedBrain({
+      compile: () => ({
+        sources: [HN_SOURCE],
+        nipMappings: [{ nip: 'NIP-01', kind: 1 }],
+        cadence: 'hourly',
+        budgetCap: 1000,
+        relaySet: relayList,
+      }),
+    });
+    const below = new FixtureBelow({
+      fixtures: {
+        ...fixturesFor(HN_SOURCE, INITIAL_PAYLOAD),
+        ...fixturesFor(BLOG_SOURCE, BLOG_PAYLOAD),
+      },
+    });
+
+    await plant(
+      { utterance: 'hn roguelike scene', mnemonic: MNEMONIC, index },
+      { relay: freshInstance(relayConnections), brain }
+    );
+    await tick(
+      { mnemonic: MNEMONIC, index },
+      { below, relay: freshInstance(relayConnections) }
+    );
+
+    // Amend from a fresh instance too — the amendment itself must not
+    // depend on any process state carried over from planting or ticking.
+    await amend(
+      {
+        mnemonic: MNEMONIC,
+        index,
+        spec: {
+          sources: [BLOG_SOURCE],
+          nipMappings: [{ nip: 'NIP-01', kind: 1 }],
+          cadence: 'hourly',
+          budgetCap: 1000,
+          relaySet: relayList,
+        },
+      },
+      { relay: freshInstance(relayConnections) }
+    );
+
+    // Resume cold and tick again: the amended spec (blog only) is honored —
+    // hn stays stopped, blog starts fresh.
+    const resumed = await tick(
+      { mnemonic: MNEMONIC, index },
+      { below, relay: freshInstance(relayConnections) }
+    );
+
+    expect(resumed.published).toHaveLength(1);
+    const resourceTag = resumed.published[0]?.tags.find(
+      (tag) => tag[0] === 'resource'
+    )?.[1];
+    expect(resourceTag).toContain('blog.example');
+
+    for (const relay of relayConnections.values()) {
+      const dittos = await relay.readBack({ kinds: [1] });
+      expect(dittos).toHaveLength(2);
+    }
   });
 });

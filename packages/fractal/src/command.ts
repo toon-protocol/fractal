@@ -6,6 +6,8 @@ import type { PlantRequest } from './plant.js';
 import { tick } from './tick.js';
 import { interpret } from './interpret.js';
 import { status } from './status.js';
+import { amend } from './amend.js';
+import type { DimensionSpec } from './domain/spec.js';
 
 /**
  * Tracks packages/fractal/package.json's version — the CLI's own version
@@ -57,6 +59,10 @@ export async function runCommand(
     return runStatus(rest, ports);
   }
 
+  if (command === 'amend') {
+    return runAmend(rest, ports);
+  }
+
   return {
     exitCode: 1,
     stdout: '',
@@ -83,6 +89,20 @@ function parseIndexValue(
   return { ok: true, index };
 }
 
+/** Last occurrence wins, matching argv convention for repeated flags. */
+function findFlagValue(
+  argv: readonly string[],
+  flagName: string
+): string | undefined {
+  let value: string | undefined;
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === flagName) {
+      value = argv[i + 1];
+    }
+  }
+  return value;
+}
+
 type ParsedMnemonicAndIndex =
   | { readonly ok: true; readonly mnemonic: string; readonly index: number }
   | { readonly ok: false; readonly error: string };
@@ -92,17 +112,8 @@ function parseMnemonicAndIndexFlags(
   flags: readonly string[],
   commandName: string
 ): ParsedMnemonicAndIndex {
-  let mnemonic: string | undefined;
-  let indexRaw: string | undefined;
-  for (let i = 0; i < flags.length; i += 1) {
-    if (flags[i] === '--mnemonic') {
-      mnemonic = flags[i + 1];
-      i += 1;
-    } else if (flags[i] === '--index') {
-      indexRaw = flags[i + 1];
-      i += 1;
-    }
-  }
+  const mnemonic = findFlagValue(flags, '--mnemonic');
+  const indexRaw = findFlagValue(flags, '--index');
 
   if (!mnemonic) {
     return {
@@ -198,6 +209,54 @@ async function runTick(
       withheld: result.withheld,
     };
     return `${result.npub}\n${JSON.stringify(summary, null, 2)}\n`;
+  });
+}
+
+type ParsedAmendArgs =
+  | {
+      readonly ok: true;
+      readonly mnemonic: string;
+      readonly index: number;
+      readonly spec: DimensionSpec;
+    }
+  | { readonly ok: false; readonly error: string };
+
+function parseAmendArgv(argv: readonly string[]): ParsedAmendArgs {
+  const parsed = parseMnemonicAndIndexFlags(argv, 'amend');
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const specRaw = findFlagValue(argv, '--spec');
+  if (specRaw === undefined) {
+    return { ok: false, error: 'fractal amend: --spec is required\n' };
+  }
+
+  let spec: DimensionSpec;
+  try {
+    spec = JSON.parse(specRaw) as DimensionSpec;
+  } catch {
+    return { ok: false, error: 'fractal amend: --spec must be valid JSON\n' };
+  }
+
+  return { ok: true, mnemonic: parsed.mnemonic, index: parsed.index, spec };
+}
+
+async function runAmend(
+  argv: readonly string[],
+  ports: Ports
+): Promise<CommandResult> {
+  const parsed = parseAmendArgv(argv);
+  if (!parsed.ok) {
+    return { exitCode: 1, stdout: '', stderr: parsed.error };
+  }
+
+  return toCommandResult(async () => {
+    const result = await amend(
+      { mnemonic: parsed.mnemonic, index: parsed.index, spec: parsed.spec },
+      { relay: ports.relay }
+    );
+    return `${result.npub}\n${JSON.stringify(result.spec, null, 2)}\n`;
   });
 }
 
