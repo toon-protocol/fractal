@@ -12,6 +12,7 @@ import {
   SPEC_EVENT_KIND,
   PROFILE_EVENT_KIND,
 } from './plant.js';
+import { FEED_RESOURCE } from './adapters/feed.js';
 import type { DimensionSpec } from './domain/spec.js';
 
 const MNEMONIC =
@@ -142,6 +143,107 @@ describe('runCommand (black-box command layer)', () => {
 
       expect(second.exitCode).toBe(1);
       expect(second.stderr).toMatch(/already planted/i);
+    });
+  });
+
+  describe('tick', () => {
+    const HN_PAYLOAD = [
+      {
+        id: 41,
+        title: 'Show HN: fractal',
+        url: 'https://hacker-news.example/items/41',
+        by: 'pg',
+        time: 1_784_000_000,
+      },
+    ];
+
+    async function plantedPorts(index: number): Promise<{
+      ports: Ports;
+      relay: InMemoryRelay;
+    }> {
+      const relay = new InMemoryRelay();
+      const below = new FixtureBelow({
+        fixtures: { [`hn:${FEED_RESOURCE}`]: HN_PAYLOAD },
+      });
+      const ports: Ports = {
+        below,
+        relay,
+        brain: new ScriptedBrain({ compile: () => compiledSpec }),
+      };
+      await runCommand(
+        [
+          'plant',
+          'indie game dev scene',
+          '--mnemonic',
+          MNEMONIC,
+          '--index',
+          String(index),
+        ],
+        ports
+      );
+      return { ports, relay };
+    }
+
+    it('ticks the ditto loop end-to-end, publishing gate-passed candidates signed by the dimension key, with no Brain-port call', async () => {
+      const { ports } = await plantedPorts(20);
+      const identity = deriveDimensionIdentity(MNEMONIC, 20);
+
+      const result = await runCommand(
+        ['tick', '--mnemonic', MNEMONIC, '--index', '20'],
+        ports
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toContain(identity.npub);
+      expect(result.stdout).toContain('"published": 1');
+
+      const dittos = await ports.relay.readBack({
+        authors: [identity.pubkey],
+        kinds: [1],
+      });
+      expect(dittos).toHaveLength(1);
+      for (const event of dittos) {
+        expect(verifyEvent({ ...event, created_at: event.createdAt })).toBe(
+          true
+        );
+      }
+    });
+
+    it('publishes nothing new on a second tick against unchanged fixtures (cursor via read-back)', async () => {
+      const { ports } = await plantedPorts(21);
+      const argv = ['tick', '--mnemonic', MNEMONIC, '--index', '21'];
+
+      const first = await runCommand(argv, ports);
+      expect(first.stdout).toContain('"published": 1');
+
+      const second = await runCommand(argv, ports);
+
+      expect(second.exitCode).toBe(0);
+      expect(second.stdout).toContain('"published": 0');
+      expect(second.stdout).toContain('"kickedBack": []');
+    });
+
+    it('rejects ticking a dimension that has not been planted', async () => {
+      const { ports } = fakedPorts();
+
+      const result = await runCommand(
+        ['tick', '--mnemonic', MNEMONIC, '--index', '42'],
+        ports
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/not been planted/i);
+    });
+
+    it('rejects missing --mnemonic without touching any port', async () => {
+      const { ports, relay } = fakedPorts();
+
+      const result = await runCommand(['tick', '--index', '0'], ports);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/--mnemonic/i);
+      expect(await relay.readBack({})).toEqual([]);
     });
   });
 });

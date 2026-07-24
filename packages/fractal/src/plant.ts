@@ -1,12 +1,9 @@
-import { finalizeEvent } from 'nostr-tools/pure';
-import type { EventTemplate } from 'nostr-tools/pure';
-import { deriveDimensionIdentity } from './identity.js';
-import type { DimensionIdentity } from './identity.js';
+import { deriveDimensionIdentity, signEvent } from './identity.js';
 import { DEFAULT_RELAY_SET } from './domain/spec.js';
 import type { DimensionSpec } from './domain/spec.js';
 import type { Seed } from './domain/seed.js';
 import type { BrainPort } from './ports/brain.js';
-import type { RelayPort, RelaySignedEvent } from './ports/relay.js';
+import type { RelayPort } from './ports/relay.js';
 
 /** NIP-01 profile metadata (mutable — later tickets bind ArNS names here). */
 export const PROFILE_EVENT_KIND = 0;
@@ -96,20 +93,4 @@ export async function plant(
   }
 
   return { pubkey: identity.pubkey, npub: identity.npub, seed, spec };
-}
-
-function signEvent(
-  identity: DimensionIdentity,
-  template: EventTemplate
-): RelaySignedEvent {
-  const finalized = finalizeEvent(template, identity.privateKey);
-  return {
-    id: finalized.id,
-    pubkey: finalized.pubkey,
-    kind: finalized.kind,
-    content: finalized.content,
-    tags: finalized.tags,
-    createdAt: finalized.created_at,
-    sig: finalized.sig,
-  };
 }
