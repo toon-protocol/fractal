@@ -4,7 +4,6 @@ import type { BrainPort } from './ports/brain.js';
 import { plant } from './plant.js';
 import type { PlantRequest } from './plant.js';
 import { tick } from './tick.js';
-import type { TickRequest } from './tick.js';
 
 /**
  * Tracks packages/fractal/package.json's version — the CLI's own version
@@ -120,19 +119,6 @@ function parsePlantArgv(argv: readonly string[]): ParsedPlantArgs {
   };
 }
 
-type ParsedTickArgs =
-  | { readonly ok: true; readonly args: TickRequest }
-  | { readonly ok: false; readonly error: string };
-
-function parseTickArgv(argv: readonly string[]): ParsedTickArgs {
-  const parsed = parseMnemonicAndIndexFlags(argv, 'tick');
-  if (!parsed.ok) {
-    return parsed;
-  }
-
-  return { ok: true, args: { mnemonic: parsed.mnemonic, index: parsed.index } };
-}
-
 async function runPlant(
   argv: readonly string[],
   ports: Ports
@@ -159,16 +145,16 @@ async function runTick(
   argv: readonly string[],
   ports: Ports
 ): Promise<CommandResult> {
-  const parsed = parseTickArgv(argv);
+  const parsed = parseMnemonicAndIndexFlags(argv, 'tick');
   if (!parsed.ok) {
     return { exitCode: 1, stdout: '', stderr: parsed.error };
   }
 
   try {
-    const result = await tick(parsed.args, {
-      below: ports.below,
-      relay: ports.relay,
-    });
+    const result = await tick(
+      { mnemonic: parsed.mnemonic, index: parsed.index },
+      { below: ports.below, relay: ports.relay }
+    );
     const summary = {
       published: result.published.length,
       kickedBack: result.kickedBack,
