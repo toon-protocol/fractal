@@ -46,4 +46,15 @@ describe('AdapterRegistry', () => {
       /already registered/i
     );
   });
+
+  it('registers none of a multi-kind adapter when only one of its kinds conflicts', () => {
+    const registry = new AdapterRegistry();
+    registry.register(stubAdapter(['hn']));
+
+    expect(() => registry.register(stubAdapter(['rss', 'hn']))).toThrow(
+      /already registered/i
+    );
+
+    expect(() => registry.resolve('rss')).toThrow(/no adapter registered/i);
+  });
 });

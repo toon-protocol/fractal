@@ -16,6 +16,8 @@ export class AdapterRegistry {
           `AdapterRegistry: "${kind}" is already registered to another adapter`
         );
       }
+    }
+    for (const kind of adapter.supportedKinds) {
       this.adapters.set(kind, adapter);
     }
   }
