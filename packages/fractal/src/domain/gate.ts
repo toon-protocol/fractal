@@ -46,6 +46,14 @@ function isTagList(value: unknown): value is readonly (readonly string[])[] {
   );
 }
 
+function isValidKindNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+function isValidCreatedAt(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0;
+}
+
 function isProvenanceShape(value: unknown): value is Provenance {
   return (
     isRecord(value) &&
@@ -64,9 +72,11 @@ function isJsonObject(content: string): boolean {
   }
 }
 
-type SchemaCheck =
-  | { readonly ok: true; readonly candidate: CandidateEvent }
+type SchemaCheckResult<T> =
+  | { readonly ok: true; readonly candidate: T }
   | { readonly ok: false; readonly reasons: readonly string[] };
+
+type SchemaCheck = SchemaCheckResult<CandidateEvent>;
 
 /**
  * NIP-01 structural validation, run against unknown input rather than the
@@ -83,19 +93,14 @@ function checkSchema(input: unknown): SchemaCheck {
 
   const { kind, content, tags, createdAt, provenance } = input;
 
-  const kindIsValidInteger =
-    typeof kind === 'number' && Number.isInteger(kind) && kind >= 0;
+  const kindIsValidInteger = isValidKindNumber(kind);
   if (!kindIsValidInteger) {
     reasons.push('schema:invalid-kind');
   } else if (!SUPPORTED_KINDS.has(kind)) {
     reasons.push('schema:unsupported-kind');
   }
 
-  if (
-    typeof createdAt !== 'number' ||
-    !Number.isInteger(createdAt) ||
-    createdAt <= 0
-  ) {
+  if (!isValidCreatedAt(createdAt)) {
     reasons.push('schema:invalid-created-at');
   }
 
@@ -172,7 +177,9 @@ function checkKindAllowed(
   return allowedKinds.has(candidate.kind) ? undefined : 'spec:kind-not-allowed';
 }
 
-function checkContentSize(candidate: CandidateEvent): string | undefined {
+function checkContentSize(candidate: {
+  readonly content: string;
+}): string | undefined {
   return candidate.content.length > MAX_CANDIDATE_CONTENT_LENGTH
     ? 'content:oversized'
     : undefined;
@@ -216,9 +223,7 @@ export function evaluateCandidate(
   return reasons.length === 0 ? { ok: true } : { ok: false, reasons };
 }
 
-type InterpretationSchemaCheck =
-  | { readonly ok: true; readonly candidate: InterpretationCandidate }
-  | { readonly ok: false; readonly reasons: readonly string[] };
+type InterpretationSchemaCheck = SchemaCheckResult<InterpretationCandidate>;
 
 /**
  * NIP-01 structural validation for interpretation candidates — same
@@ -234,19 +239,14 @@ function checkInterpretationSchema(input: unknown): InterpretationSchemaCheck {
 
   const { kind, content, tags, createdAt } = input;
 
-  const kindIsValidInteger =
-    typeof kind === 'number' && Number.isInteger(kind) && kind >= 0;
+  const kindIsValidInteger = isValidKindNumber(kind);
   if (!kindIsValidInteger) {
     reasons.push('schema:invalid-kind');
   } else if (kind !== INTERPRETATION_EVENT_KIND) {
     reasons.push('schema:unsupported-kind');
   }
 
-  if (
-    typeof createdAt !== 'number' ||
-    !Number.isInteger(createdAt) ||
-    createdAt <= 0
-  ) {
+  if (!isValidCreatedAt(createdAt)) {
     reasons.push('schema:invalid-created-at');
   }
 
@@ -311,14 +311,6 @@ function checkNotDittoShaped(
   return carriesDittoTags ? 'interpretation:ditto-blend' : undefined;
 }
 
-function checkInterpretationContentSize(
-  candidate: InterpretationCandidate
-): string | undefined {
-  return candidate.content.length > MAX_CANDIDATE_CONTENT_LENGTH
-    ? 'content:oversized'
-    : undefined;
-}
-
 /**
  * The NIP gate's interpretation counterpart: candidate in, verdict out.
  * Every interpretation candidate — brain-authored commentary, never a
@@ -337,7 +329,7 @@ export function evaluateInterpretation(
   const reasons = [
     checkSubjectReferences(schemaCheck.candidate, dittoIds),
     checkNotDittoShaped(schemaCheck.candidate),
-    checkInterpretationContentSize(schemaCheck.candidate),
+    checkContentSize(schemaCheck.candidate),
   ].filter((reason): reason is string => reason !== undefined);
 
   return reasons.length === 0 ? { ok: true } : { ok: false, reasons };
