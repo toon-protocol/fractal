@@ -4,6 +4,7 @@ import type { BrainPort } from './ports/brain.js';
 import { plant } from './plant.js';
 import type { PlantRequest } from './plant.js';
 import { tick } from './tick.js';
+import { interpret } from './interpret.js';
 
 /**
  * Tracks packages/fractal/package.json's version — the CLI's own version
@@ -45,6 +46,10 @@ export async function runCommand(
 
   if (command === 'tick') {
     return runTick(rest, ports);
+  }
+
+  if (command === 'interpret') {
+    return runInterpret(rest, ports);
   }
 
   return {
@@ -119,6 +124,22 @@ function parsePlantArgv(argv: readonly string[]): ParsedPlantArgs {
   };
 }
 
+/** Runs a command's ported action, formatting its stdout on success or its thrown error on failure. */
+async function toCommandResult(
+  action: () => Promise<string>
+): Promise<CommandResult> {
+  try {
+    const stdout = await action();
+    return { exitCode: 0, stdout, stderr: '' };
+  } catch (error) {
+    return {
+      exitCode: 1,
+      stdout: '',
+      stderr: `${error instanceof Error ? error.message : String(error)}\n`,
+    };
+  }
+}
+
 async function runPlant(
   argv: readonly string[],
   ports: Ports
@@ -128,17 +149,10 @@ async function runPlant(
     return { exitCode: 1, stdout: '', stderr: parsed.error };
   }
 
-  try {
+  return toCommandResult(async () => {
     const result = await plant(parsed.args, ports);
-    const stdout = `${result.npub}\n${JSON.stringify(result.spec, null, 2)}\n`;
-    return { exitCode: 0, stdout, stderr: '' };
-  } catch (error) {
-    return {
-      exitCode: 1,
-      stdout: '',
-      stderr: `${error instanceof Error ? error.message : String(error)}\n`,
-    };
-  }
+    return `${result.npub}\n${JSON.stringify(result.spec, null, 2)}\n`;
+  });
 }
 
 async function runTick(
@@ -150,7 +164,7 @@ async function runTick(
     return { exitCode: 1, stdout: '', stderr: parsed.error };
   }
 
-  try {
+  return toCommandResult(async () => {
     const result = await tick(
       { mnemonic: parsed.mnemonic, index: parsed.index },
       { below: ports.below, relay: ports.relay }
@@ -159,13 +173,28 @@ async function runTick(
       published: result.published.length,
       kickedBack: result.kickedBack,
     };
-    const stdout = `${result.npub}\n${JSON.stringify(summary, null, 2)}\n`;
-    return { exitCode: 0, stdout, stderr: '' };
-  } catch (error) {
-    return {
-      exitCode: 1,
-      stdout: '',
-      stderr: `${error instanceof Error ? error.message : String(error)}\n`,
-    };
+    return `${result.npub}\n${JSON.stringify(summary, null, 2)}\n`;
+  });
+}
+
+async function runInterpret(
+  argv: readonly string[],
+  ports: Ports
+): Promise<CommandResult> {
+  const parsed = parseMnemonicAndIndexFlags(argv, 'interpret');
+  if (!parsed.ok) {
+    return { exitCode: 1, stdout: '', stderr: parsed.error };
   }
+
+  return toCommandResult(async () => {
+    const result = await interpret(
+      { mnemonic: parsed.mnemonic, index: parsed.index },
+      { relay: ports.relay, brain: ports.brain }
+    );
+    const summary = {
+      published: result.published.length,
+      kickedBack: result.kickedBack,
+    };
+    return `${result.npub}\n${JSON.stringify(summary, null, 2)}\n`;
+  });
 }

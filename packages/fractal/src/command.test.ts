@@ -13,6 +13,7 @@ import {
   PROFILE_EVENT_KIND,
 } from './plant.js';
 import { FEED_RESOURCE } from './adapters/feed.js';
+import { INTERPRETATION_EVENT_KIND } from './domain/event.js';
 import type { DimensionSpec } from './domain/spec.js';
 
 const MNEMONIC =
@@ -240,6 +241,112 @@ describe('runCommand (black-box command layer)', () => {
       const { ports, relay } = fakedPorts();
 
       const result = await runCommand(['tick', '--index', '0'], ports);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/--mnemonic/i);
+      expect(await relay.readBack({})).toEqual([]);
+    });
+  });
+
+  describe('interpret', () => {
+    const HN_PAYLOAD = [
+      {
+        id: 41,
+        title: 'Show HN: fractal',
+        url: 'https://hacker-news.example/items/41',
+        by: 'pg',
+        time: 1_784_000_000,
+      },
+    ];
+
+    async function dittoedPorts(index: number): Promise<{
+      ports: Ports;
+      relay: InMemoryRelay;
+    }> {
+      const relay = new InMemoryRelay();
+      const below = new FixtureBelow({
+        fixtures: { [`hn:${FEED_RESOURCE}`]: HN_PAYLOAD },
+      });
+      const ports: Ports = {
+        below,
+        relay,
+        brain: new ScriptedBrain({
+          compile: () => compiledSpec,
+          interpret: () => 'a wave of roguelike devlogs this week',
+        }),
+      };
+      await runCommand(
+        [
+          'plant',
+          'indie game dev scene',
+          '--mnemonic',
+          MNEMONIC,
+          '--index',
+          String(index),
+        ],
+        ports
+      );
+      await runCommand(
+        ['tick', '--mnemonic', MNEMONIC, '--index', String(index)],
+        ports
+      );
+      return { ports, relay };
+    }
+
+    it('interprets the ditto loop end-to-end, publishing commentary that references the existing dittos', async () => {
+      const { ports } = await dittoedPorts(40);
+      const identity = deriveDimensionIdentity(MNEMONIC, 40);
+
+      const result = await runCommand(
+        ['interpret', '--mnemonic', MNEMONIC, '--index', '40'],
+        ports
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toContain(identity.npub);
+      expect(result.stdout).toContain('"published": 1');
+
+      const dittos = await ports.relay.readBack({
+        authors: [identity.pubkey],
+        kinds: [1],
+      });
+      const interpretations = await ports.relay.readBack({
+        authors: [identity.pubkey],
+        kinds: [INTERPRETATION_EVENT_KIND],
+      });
+      expect(interpretations).toHaveLength(1);
+      const [interpretation] = interpretations;
+      expect(
+        verifyEvent({
+          ...interpretation,
+          created_at: interpretation?.createdAt,
+        })
+      ).toBe(true);
+      const referencedIds = interpretation?.tags
+        .filter((tag) => tag[0] === 'e')
+        .map((tag) => tag[1]);
+      expect(new Set(referencedIds)).toEqual(
+        new Set(dittos.map((ditto) => ditto.id))
+      );
+    });
+
+    it('rejects interpreting a dimension that has not been planted', async () => {
+      const { ports } = fakedPorts();
+
+      const result = await runCommand(
+        ['interpret', '--mnemonic', MNEMONIC, '--index', '42'],
+        ports
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/not been planted/i);
+    });
+
+    it('rejects missing --mnemonic without touching any port', async () => {
+      const { ports, relay } = fakedPorts();
+
+      const result = await runCommand(['interpret', '--index', '0'], ports);
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toMatch(/--mnemonic/i);
