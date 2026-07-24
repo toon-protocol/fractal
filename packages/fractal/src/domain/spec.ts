@@ -33,3 +33,10 @@ export interface DimensionSpec {
  * by default (CONTEXT.md — Relay set).
  */
 export const DEFAULT_RELAY_SET: readonly string[] = ['wss://relay.toon.social'];
+
+/** Falls back to {@link DEFAULT_RELAY_SET} when a spec carries no relay set of its own. */
+export function resolveRelaySet(
+  relaySet: readonly string[]
+): readonly string[] {
+  return relaySet.length > 0 ? relaySet : DEFAULT_RELAY_SET;
+}

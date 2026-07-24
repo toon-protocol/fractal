@@ -80,6 +80,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'fixtureKey',
   'interpret',
   'plant',
+  'resolveRelaySet',
   'runCommand',
   'signEvent',
   'status',

@@ -1,5 +1,5 @@
 import { deriveDimensionIdentity, signEvent } from './identity.js';
-import { DEFAULT_RELAY_SET } from './domain/spec.js';
+import { resolveRelaySet } from './domain/spec.js';
 import type { DimensionSpec } from './domain/spec.js';
 import type { Seed } from './domain/seed.js';
 import type { BrainPort } from './ports/brain.js';
@@ -62,8 +62,7 @@ export async function plant(
   const compiled = await ports.brain.compile({ seed });
   const spec: DimensionSpec = {
     ...compiled,
-    relaySet:
-      compiled.relaySet.length > 0 ? compiled.relaySet : DEFAULT_RELAY_SET,
+    relaySet: resolveRelaySet(compiled.relaySet),
   };
 
   const createdAt = Math.floor(Date.parse(seed.plantedAt) / 1000);

@@ -1,6 +1,6 @@
 export type { Seed } from './seed.js';
 export type { DimensionSpec, SourceConfig, NipMapping } from './spec.js';
-export { DEFAULT_RELAY_SET } from './spec.js';
+export { DEFAULT_RELAY_SET, resolveRelaySet } from './spec.js';
 export type {
   CandidateEvent,
   InterpretationCandidate,

@@ -89,6 +89,20 @@ function parseIndexValue(
   return { ok: true, index };
 }
 
+/** Last occurrence wins, matching argv convention for repeated flags. */
+function findFlagValue(
+  argv: readonly string[],
+  flagName: string
+): string | undefined {
+  let value: string | undefined;
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === flagName) {
+      value = argv[i + 1];
+    }
+  }
+  return value;
+}
+
 type ParsedMnemonicAndIndex =
   | { readonly ok: true; readonly mnemonic: string; readonly index: number }
   | { readonly ok: false; readonly error: string };
@@ -98,17 +112,8 @@ function parseMnemonicAndIndexFlags(
   flags: readonly string[],
   commandName: string
 ): ParsedMnemonicAndIndex {
-  let mnemonic: string | undefined;
-  let indexRaw: string | undefined;
-  for (let i = 0; i < flags.length; i += 1) {
-    if (flags[i] === '--mnemonic') {
-      mnemonic = flags[i + 1];
-      i += 1;
-    } else if (flags[i] === '--index') {
-      indexRaw = flags[i + 1];
-      i += 1;
-    }
-  }
+  const mnemonic = findFlagValue(flags, '--mnemonic');
+  const indexRaw = findFlagValue(flags, '--index');
 
   if (!mnemonic) {
     return {
@@ -222,13 +227,7 @@ function parseAmendArgv(argv: readonly string[]): ParsedAmendArgs {
     return parsed;
   }
 
-  let specRaw: string | undefined;
-  for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === '--spec') {
-      specRaw = argv[i + 1];
-      i += 1;
-    }
-  }
+  const specRaw = findFlagValue(argv, '--spec');
   if (specRaw === undefined) {
     return { ok: false, error: 'fractal amend: --spec is required\n' };
   }

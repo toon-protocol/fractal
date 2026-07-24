@@ -1,5 +1,5 @@
 import { deriveDimensionIdentity, signEvent } from './identity.js';
-import { DEFAULT_RELAY_SET } from './domain/spec.js';
+import { resolveRelaySet } from './domain/spec.js';
 import type { DimensionSpec } from './domain/spec.js';
 import { SPEC_EVENT_KIND } from './plant.js';
 import { readPlantedSpec } from './relay-reads.js';
@@ -47,10 +47,7 @@ export async function amend(
 
   const spec: DimensionSpec = {
     ...request.spec,
-    relaySet:
-      request.spec.relaySet.length > 0
-        ? request.spec.relaySet
-        : DEFAULT_RELAY_SET,
+    relaySet: resolveRelaySet(request.spec.relaySet),
   };
 
   const event = signEvent(identity, {
