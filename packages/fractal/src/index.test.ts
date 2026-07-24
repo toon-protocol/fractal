@@ -27,6 +27,7 @@ import type {
   CompileRequest,
   InterpretRequest,
   AdaptRequest,
+  MediumAdapter,
   FixtureBelowOptions,
   BrainScript,
 } from './index.js';
@@ -38,8 +39,10 @@ import type {
 // value-export check below is the one regression guard CI actually runs.
 
 const EXPECTED_VALUE_EXPORTS = [
+  'AdapterRegistry',
   'CLI_VERSION',
   'DEFAULT_RELAY_SET',
+  'FEED_RESOURCE',
   'FixtureBelow',
   'InMemoryRelay',
   'MAX_CANDIDATE_CONTENT_LENGTH',
@@ -50,6 +53,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'SPEC_EVENT_KIND',
   'deriveDimensionIdentity',
   'evaluateCandidate',
+  'feedAdapter',
   'fixtureKey',
   'plant',
   'runCommand',

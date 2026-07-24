@@ -5,3 +5,4 @@ export * from './identity.js';
 export * from './plant.js';
 export * from './ports/index.js';
 export * from './fakes/index.js';
+export * from './adapters/index.js';
