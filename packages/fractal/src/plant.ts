@@ -60,8 +60,12 @@ export async function plant(
   };
 
   const compiled = await ports.brain.compile({ seed });
+  const budgetCap = ports.relay.fundChannel
+    ? await ports.relay.fundChannel(compiled.budgetCap)
+    : compiled.budgetCap;
   const spec: DimensionSpec = {
     ...compiled,
+    budgetCap,
     relaySet: resolveRelaySet(compiled.relaySet),
   };
 

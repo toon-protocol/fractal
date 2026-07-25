@@ -11,6 +11,7 @@ import { ScriptedBrain } from './fakes/scripted-brain.js';
 import { deriveDimensionIdentity } from './identity.js';
 import { DEFAULT_RELAY_SET } from './domain/spec.js';
 import type { DimensionSpec } from './domain/spec.js';
+import type { RelayPort } from './ports/relay.js';
 
 const MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
@@ -132,5 +133,47 @@ describe('plant', () => {
     expect(JSON.parse(seedEvent!.content).utterance).toBe(
       'build me a dimension of the indie game dev scene'
     );
+  });
+
+  it('overrides the compiled budget cap with the funded channel balance when the relay funds a channel', async () => {
+    const inMemory = new InMemoryRelay();
+    let fundedFor: number | undefined;
+    const relay: RelayPort = {
+      publish: (request) => inMemory.publish(request),
+      readBack: (query) => inMemory.readBack(query),
+      quoteFee: (request) => inMemory.quoteFee(request),
+      fundChannel: async (desiredCap: number) => {
+        fundedFor = desiredCap;
+        return 42;
+      },
+    };
+    const brain = new ScriptedBrain({ compile: () => compiledSpec });
+
+    const result = await plant(
+      { utterance: 'indie game dev scene', mnemonic: MNEMONIC, index: 4 },
+      { relay, brain }
+    );
+
+    expect(fundedFor).toBe(compiledSpec.budgetCap);
+    expect(result.spec.budgetCap).toBe(42);
+
+    const identity = deriveDimensionIdentity(MNEMONIC, 4);
+    const [specEvent] = await relay.readBack({
+      authors: [identity.pubkey],
+      kinds: [SPEC_EVENT_KIND],
+    });
+    expect(JSON.parse(specEvent!.content).budgetCap).toBe(42);
+  });
+
+  it('keeps the brain-compiled budget cap when the relay has no channel to fund', async () => {
+    const relay = new InMemoryRelay();
+    const brain = new ScriptedBrain({ compile: () => compiledSpec });
+
+    const result = await plant(
+      { utterance: 'indie game dev scene', mnemonic: MNEMONIC, index: 5 },
+      { relay, brain }
+    );
+
+    expect(result.spec.budgetCap).toBe(compiledSpec.budgetCap);
   });
 });
