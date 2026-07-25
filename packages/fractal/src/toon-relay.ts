@@ -193,9 +193,13 @@ export class ToonRelay implements RelayPort {
     const channelId = await this.resolveChannel();
     const current = this.publishClient.getChannelDepositTotal(channelId);
     const desired = BigInt(Math.trunc(desiredCap));
-    if (desired > current) {
-      await this.publishClient.depositToChannel(channelId, desired - current);
+    if (desired <= current) {
+      return Number(current);
     }
-    return Number(this.publishClient.getChannelDepositTotal(channelId));
+    const { depositTotal } = await this.publishClient.depositToChannel(
+      channelId,
+      desired - current
+    );
+    return Number(depositTotal);
   }
 }
