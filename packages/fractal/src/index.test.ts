@@ -48,6 +48,9 @@ import type {
   MediumAdapter,
   FixtureBelowOptions,
   BrainScript,
+  ToonPublishClient,
+  NostrReadClient,
+  ToonRelayOptions,
 } from './index.js';
 
 // The `import type { ... }` above is itself the guard: if a type is renamed
@@ -60,6 +63,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'AdapterRegistry',
   'CLI_VERSION',
   'amend',
+  'ChannelBudgetExceededError',
   'DEFAULT_RELAY_SET',
   'FEED_RESOURCE',
   'FixtureBelow',
@@ -69,6 +73,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'PROFILE_EVENT_KIND',
   'RelayPool',
   'ScriptedBrain',
+  'ToonRelay',
   'SEED_EVENT_KIND',
   'SPEC_EVENT_KIND',
   'INTERPRETATION_EVENT_KIND',

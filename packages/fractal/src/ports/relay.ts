@@ -42,4 +42,14 @@ export interface RelayPort {
    * `publish` actually reports for the same request.
    */
   quoteFee(request: PublishRequest): Promise<number>;
+  /**
+   * Funds (or tops up) the dimension's own payment channel to at least
+   * `desiredCap` and returns the channel's actual resulting balance — the
+   * authoritative budget cap, since "budget cap is the channel balance,
+   * enforced by construction" (CONTEXT.md — Dimension identity). Optional:
+   * a relay with no real channel underneath it (the in-memory fake, a plain
+   * relay-set fan-out) has no funding step, so `plant` falls back to
+   * whatever budget cap the brain compiled.
+   */
+  fundChannel?(desiredCap: number): Promise<number>;
 }

@@ -24,6 +24,7 @@
     "clean": "tsc -b --clean"
   },
   "dependencies": {
+    "@toon-protocol/client": "^0.21.3",
     "nostr-tools": "^2.24.1"
   }
 }
