@@ -44,8 +44,9 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { sandboxSecrets } from "./sandbox-secrets.ts";
 import { openPrWithRetry } from "./pr-open.ts";
 import {
-  postBlockingVerdict,
+  resolveFactoryOpsIdentity,
   runReviewerWithVerdict,
+  submitFactoryOpsVerdict,
 } from "./review-verdict.ts";
 
 // ---------------------------------------------------------------------------
@@ -66,6 +67,18 @@ const autoMerge = process.env.SANDCASTLE_AUTO_MERGE === "true";
 // Deterministic branch name, matching the planner's convention in main.ts so a
 // re-run of the same issue reuses the same branch and accumulated progress.
 const branch = `sandcastle/issue-${issueNumber}`;
+
+// PREFLIGHT the factory-ops approver credential (toon-meta#282) in PR mode,
+// BEFORE the expensive implement+review passes: the PR this runner opens gets
+// its formal verdict (APPROVE / REQUEST_CHANGES) submitted as factory-ops, so
+// a missing/expired FACTORY_OPS_TOKEN should fail the job in seconds, not
+// after a full sandcastle run. The author≠approver guard runs at submission
+// time (the PR — and hence its author — does not exist yet). Auto-merge mode
+// merges directly with no PR, so it needs no approver.
+if (process.env.SANDCASTLE_AUTO_MERGE !== "true") {
+  const preflight = resolveFactoryOpsIdentity();
+  console.log(`Approver preflight OK: factory-ops is '${preflight.login}'.`);
+}
 
 // Fetch the issue title on the host so we can pass it to the prompts and name
 // the PR. `gh` authenticates via GH_TOKEN in the environment.
@@ -240,15 +253,21 @@ try {
       console.log(
         `\nVerified: PR #${openPr.pr.number} is open — ${openPr.pr.url}`,
       );
-      // A blocking verdict lands on the PR now that it exists: findings as a
-      // PR review, plus the `needs:human` label (toon-meta#275).
-      if (blocking) {
-        postBlockingVerdict(String(openPr.pr.number), review.verdict, {
-          number: issueNumber,
-          title: issueTitle,
-        });
-      }
-      console.log("Awaiting human review.");
+      // The formal verdict lands on the PR now that it exists, submitted as
+      // factory-ops (toon-meta#282): clean → APPROVE (a machine verdict —
+      // see toon-meta's FACTORY.md, "What a factory-ops approval attests");
+      // blocking → REQUEST_CHANGES with the findings plus `needs:human`
+      // (toon-meta#275). The author≠approver guard runs inside the submission
+      // and fails the job loudly rather than degrading to a COMMENTED review.
+      submitFactoryOpsVerdict(String(openPr.pr.number), review.verdict, {
+        number: issueNumber,
+        title: issueTitle,
+      });
+      console.log(
+        blocking
+          ? "Blocking findings requested changes — a human decides."
+          : "Formal approval submitted.",
+      );
     } else {
       // FAIL LOUD, but do not lose anything: the branch is pushed and the
       // implement+review cycle already completed. Name the branch and hand
