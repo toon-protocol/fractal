@@ -5,6 +5,7 @@ import {
   type ToonPublishClient,
   type NostrReadClient,
 } from './toon-relay.js';
+import type { NostrEvent } from 'nostr-tools/pure';
 import type { RelaySignedEvent } from './ports/relay.js';
 
 function signedEvent(
@@ -57,9 +58,9 @@ function mockPublishClient(options: {
   };
 }
 
-function mockReadClient(events: unknown[] = []): NostrReadClient {
+function mockReadClient(events: NostrEvent[] = []): NostrReadClient {
   return {
-    querySync: vi.fn(async () => events as never),
+    querySync: vi.fn(async () => events),
   };
 }
 
@@ -101,21 +102,17 @@ describe('ToonRelay', () => {
     });
 
     expect(publishClient.publishEvent).toHaveBeenCalledTimes(1);
-    const [publishedEvent, publishOptions] = (
-      publishClient.publishEvent as ReturnType<typeof vi.fn>
-    ).mock.calls[0] as [unknown, { destination?: string; ilpAmount?: bigint }];
-    expect(publishedEvent).toMatchObject({
-      id: event.id,
-      pubkey: event.pubkey,
-      kind: event.kind,
-      content: event.content,
-      created_at: event.createdAt,
-      sig: event.sig,
-    });
-    expect(publishOptions).toEqual({
-      destination: 'g.toon.genesis',
-      ilpAmount: 5n,
-    });
+    expect(publishClient.publishEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: event.id,
+        pubkey: event.pubkey,
+        kind: event.kind,
+        content: event.content,
+        created_at: event.createdAt,
+        sig: event.sig,
+      }),
+      { destination: 'g.toon.genesis', ilpAmount: 5n }
+    );
 
     // The real claim advanced the channel by 7, not the configured price of 5.
     expect(result.fee).toBe(7);
