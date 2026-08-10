@@ -23,37 +23,33 @@ function signedEvent(
   };
 }
 
+const CHANNEL_ID = 'channel-1';
+
 /** A mocked publish client: never opens a socket, tracks channel state purely in memory. */
 function mockPublishClient(options: {
   depositTotal?: bigint;
   cumulativeAmount?: bigint;
   cumulativeAdvanceOnPublish?: bigint;
-  channelId?: string;
-  publishSucceeds?: boolean;
+  /** When set, `publishEvent` reports failure carrying this message. */
   publishError?: string;
 }): ToonPublishClient {
-  const cumulativeAmountRef = { value: options.cumulativeAmount ?? 0n };
-  const depositTotalRef = { value: options.depositTotal ?? 100n };
-  const channelId = options.channelId ?? 'channel-1';
-  const advance = options.cumulativeAdvanceOnPublish;
+  let cumulativeAmount = options.cumulativeAmount ?? 0n;
+  let depositTotal = options.depositTotal ?? 100n;
 
   return {
-    openChannel: vi.fn(async () => channelId),
+    openChannel: vi.fn(async () => CHANNEL_ID),
     publishEvent: vi.fn(async () => {
-      if (advance !== undefined) {
-        cumulativeAmountRef.value += advance;
-      }
-      if (options.publishSucceeds === false) {
+      cumulativeAmount += options.cumulativeAdvanceOnPublish ?? 0n;
+      if (options.publishError !== undefined) {
         return { success: false, error: options.publishError };
       }
       return { success: true, eventId: 'real-event-id' };
     }),
-    getChannelCumulativeAmount: vi.fn(() => cumulativeAmountRef.value),
-    getChannelDepositTotal: vi.fn(() => depositTotalRef.value),
+    getChannelCumulativeAmount: vi.fn(() => cumulativeAmount),
+    getChannelDepositTotal: vi.fn(() => depositTotal),
     depositToChannel: vi.fn(async (_channelId: string, amount) => {
-      const delta = typeof amount === 'string' ? BigInt(amount) : amount;
-      depositTotalRef.value += delta;
-      return { channelId, depositTotal: depositTotalRef.value.toString() };
+      depositTotal += typeof amount === 'string' ? BigInt(amount) : amount;
+      return { channelId: CHANNEL_ID, depositTotal: depositTotal.toString() };
     }),
   };
 }
@@ -186,7 +182,6 @@ describe('ToonRelay', () => {
 
   it('surfaces a failed publish as a thrown error carrying the client error message', async () => {
     const publishClient = mockPublishClient({
-      publishSucceeds: false,
       publishError: 'connector rejected the claim',
     });
     const relay = new ToonRelay({

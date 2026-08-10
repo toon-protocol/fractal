@@ -10,7 +10,11 @@ import {
   dittoedResourceUrls,
 } from './relay-reads.js';
 import type { BelowPort } from './ports/below.js';
-import type { RelayPort, RelaySignedEvent } from './ports/relay.js';
+import type {
+  PublishResult,
+  RelayPort,
+  RelaySignedEvent,
+} from './ports/relay.js';
 import { ChannelBudgetExceededError } from './toon-relay.js';
 
 /**
@@ -160,7 +164,7 @@ export async function tick(
         continue;
       }
 
-      let result;
+      let result: PublishResult;
       try {
         result = await ports.relay.publish({ relaySet: spec.relaySet, event });
       } catch (error) {
