@@ -37,9 +37,12 @@ export interface RelayPort {
   readBack(query: ReadBackQuery): Promise<readonly RelaySignedEvent[]>;
   /**
    * Previews the fee a `publish` of this exact request would charge, so a
-   * caller can check a budget cap before spending (CONTEXT.md — Dimension
-   * identity, "budget cap is the channel balance"). Must agree with the fee
-   * `publish` actually reports for the same request.
+   * caller can check a budget cap before attempting the paid write
+   * (CONTEXT.md — Dimension identity, "budget cap is the channel balance").
+   * This is an estimate, not a guarantee: a real client's claim movement can
+   * differ from the quote (e.g. a connector charging more than requested).
+   * Callers doing running budget accounting must reconcile against the fee
+   * `publish` actually reports for the same request, not this quote.
    */
   quoteFee(request: PublishRequest): Promise<number>;
   /**

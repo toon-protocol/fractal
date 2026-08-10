@@ -11,6 +11,7 @@ import {
 } from './relay-reads.js';
 import type { BelowPort } from './ports/below.js';
 import type { RelayPort, RelaySignedEvent } from './ports/relay.js';
+import { ChannelBudgetExceededError } from './toon-relay.js';
 
 /**
  * The per-tick economics log: not a ditto or interpretation, so it never
@@ -141,11 +142,16 @@ export async function tick(
         created_at: candidate.createdAt,
       });
 
-      const fee = await ports.relay.quoteFee({
+      // quoteFee is a preview, not a guarantee — the client's real claim
+      // movement can differ from it (a connector charging more than
+      // requested). Use it only to skip an attempt already known to be
+      // hopeless; budget accounting below reconciles against the fee
+      // `publish` actually reports for this request.
+      const quotedFee = await ports.relay.quoteFee({
         relaySet: spec.relaySet,
         event,
       });
-      if (spent + fee > spec.budgetCap) {
+      if (spent + quotedFee > spec.budgetCap) {
         budgetExhausted = true;
         withheld.push({
           sourceId: source.id,
@@ -154,10 +160,30 @@ export async function tick(
         continue;
       }
 
-      await ports.relay.publish({ relaySet: spec.relaySet, event });
-      spent += fee;
-      feesPaidThisTick += fee;
+      let result;
+      try {
+        result = await ports.relay.publish({ relaySet: spec.relaySet, event });
+      } catch (error) {
+        if (error instanceof ChannelBudgetExceededError) {
+          // The channel-balance backstop refused a write the quote-based
+          // check above already let through — enforced by construction,
+          // so this candidate is withheld rather than aborting the tick.
+          budgetExhausted = true;
+          withheld.push({
+            sourceId: source.id,
+            resourceUrl: candidate.provenance.resourceUrl,
+          });
+          continue;
+        }
+        throw error;
+      }
+
+      spent += result.fee;
+      feesPaidThisTick += result.fee;
       published.push(event);
+      if (spent >= spec.budgetCap) {
+        budgetExhausted = true;
+      }
     }
   }
 

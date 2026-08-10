@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { verifyEvent } from 'nostr-tools/pure';
-import { tick } from './tick.js';
+import { tick, TICK_REPORT_EVENT_KIND } from './tick.js';
 import { plant } from './plant.js';
 import { SPEC_EVENT_KIND } from './plant.js';
 import { InMemoryRelay } from './fakes/in-memory-relay.js';
@@ -8,7 +8,15 @@ import { FixtureBelow } from './fakes/fixture-below.js';
 import { ScriptedBrain } from './fakes/scripted-brain.js';
 import { deriveDimensionIdentity, signEvent } from './identity.js';
 import { FEED_RESOURCE } from './adapters/feed.js';
+import { ChannelBudgetExceededError } from './toon-relay.js';
 import type { DimensionSpec, SourceConfig } from './domain/spec.js';
+import type {
+  PublishRequest,
+  PublishResult,
+  ReadBackQuery,
+  RelayPort,
+  RelaySignedEvent,
+} from './ports/relay.js';
 
 const MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
@@ -370,5 +378,133 @@ describe('tick — budget accounting & cap enforcement', () => {
     expect(second.published).toHaveLength(1);
     expect(second.withheld).toEqual([]);
     expect(second.budgetRemaining).toBe(100 - 2 * 3);
+  });
+});
+
+/**
+ * A `RelayPort` whose `quoteFee` preview diverges from the fee `publish`
+ * actually reports for the same request — standing in for a real client
+ * whose claim movement disagrees with fractal's own price quote (e.g. a
+ * connector charging more than requested).
+ */
+class ReportedFeeRelay implements RelayPort {
+  private readonly inner = new InMemoryRelay();
+
+  constructor(
+    private readonly quotedFee: number,
+    private readonly reportedFee: number
+  ) {}
+
+  async publish(request: PublishRequest): Promise<PublishResult> {
+    const result = await this.inner.publish(request);
+    return { ...result, fee: this.reportedFee };
+  }
+
+  async readBack(query: ReadBackQuery): Promise<readonly RelaySignedEvent[]> {
+    return this.inner.readBack(query);
+  }
+
+  async quoteFee(_request: PublishRequest): Promise<number> {
+    return this.quotedFee;
+  }
+}
+
+/**
+ * A `RelayPort` whose channel-balance backstop refuses the `n`th ditto
+ * publish (kind 1, the fixtures' projected candidate kind) with
+ * `ChannelBudgetExceededError` — standing in for `ToonRelay`'s real
+ * enforced-by-construction refusal on a request a caller's own quote-based
+ * pre-check already let through.
+ */
+class BudgetExceedingRelay implements RelayPort {
+  private readonly inner = new InMemoryRelay();
+  private dittoPublishes = 0;
+
+  constructor(private readonly failOnDittoNumber: number) {}
+
+  async publish(request: PublishRequest): Promise<PublishResult> {
+    if (request.event.kind === 1) {
+      this.dittoPublishes += 1;
+      if (this.dittoPublishes === this.failOnDittoNumber) {
+        throw new ChannelBudgetExceededError('channel-1', 1n, 0n);
+      }
+    }
+    return this.inner.publish(request);
+  }
+
+  async readBack(query: ReadBackQuery): Promise<readonly RelaySignedEvent[]> {
+    return this.inner.readBack(query);
+  }
+
+  async quoteFee(_request: PublishRequest): Promise<number> {
+    return 1;
+  }
+}
+
+async function plantOnto(
+  relay: RelayPort,
+  index: number,
+  budgetCap: number,
+  sources: readonly SourceConfig[]
+): Promise<void> {
+  const brain = new ScriptedBrain({
+    compile: () => ({
+      sources,
+      nipMappings: [{ nip: 'NIP-01', kind: 1 }],
+      cadence: 'hourly',
+      budgetCap,
+      relaySet: ['wss://relay.example'],
+    }),
+  });
+  await plant(
+    { utterance: 'hn roguelike scene', mnemonic: MNEMONIC, index },
+    { relay, brain }
+  );
+}
+
+describe('tick — reconciles budget accounting against the reported fee', () => {
+  const BUDGET_SOURCE: SourceConfig = {
+    id: 'hn-budget',
+    kind: 'hn',
+    endpoint: 'https://hacker-news.example/api',
+  };
+
+  it('accounts spend from the fee publish actually reports, not the quote it previewed', async () => {
+    const relay = new ReportedFeeRelay(3, 7);
+    await plantOnto(relay, 60, 1000, [BUDGET_SOURCE]);
+    const below = new FixtureBelow({
+      fixtures: fixturesFor(BUDGET_SOURCE, HN_PAYLOAD),
+    });
+
+    const result = await tick(
+      { mnemonic: MNEMONIC, index: 60 },
+      { below, relay }
+    );
+
+    expect(result.published).toHaveLength(2);
+    expect(result.feesPaid).toBe(2 * 7);
+    expect(result.budgetRemaining).toBe(1000 - 2 * 7);
+  });
+
+  it('withholds a publish the channel balance backstop refuses instead of throwing out of tick', async () => {
+    const relay = new BudgetExceedingRelay(2);
+    await plantOnto(relay, 61, 1000, [BUDGET_SOURCE]);
+    const below = new FixtureBelow({
+      fixtures: fixturesFor(BUDGET_SOURCE, HN_PAYLOAD),
+    });
+
+    const result = await tick(
+      { mnemonic: MNEMONIC, index: 61 },
+      { below, relay }
+    );
+
+    expect(result.published).toHaveLength(1);
+    expect(result.withheld).toHaveLength(1);
+    expect(result.feesPaid).toBe(1);
+
+    const reportEvents = await relay.readBack({
+      kinds: [TICK_REPORT_EVENT_KIND],
+    });
+    expect(reportEvents).toHaveLength(1);
   });
 });
