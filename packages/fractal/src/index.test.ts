@@ -51,6 +51,10 @@ import type {
   ToonPublishClient,
   NostrReadClient,
   ToonRelayOptions,
+  HeadlessQueryRequest,
+  HeadlessQueryResult,
+  HeadlessQuery,
+  ClaudeBrainOptions,
 } from './index.js';
 
 // The `import type { ... }` above is itself the guard: if a type is renamed
@@ -64,14 +68,18 @@ const EXPECTED_VALUE_EXPORTS = [
   'CLI_VERSION',
   'amend',
   'ChannelBudgetExceededError',
+  'ClaudeBrain',
   'DEFAULT_RELAY_SET',
   'FEED_RESOURCE',
   'FixtureBelow',
+  'hasHeadlessClaudeCredentials',
   'InMemoryRelay',
   'MAX_CANDIDATE_CONTENT_LENGTH',
+  'MAX_SPEC_ATTEMPTS',
   'PIPELINE_STAGES',
   'PROFILE_EVENT_KIND',
   'RelayPool',
+  'runHeadlessQuery',
   'ScriptedBrain',
   'ToonRelay',
   'SEED_EVENT_KIND',
@@ -90,6 +98,7 @@ const EXPECTED_VALUE_EXPORTS = [
   'signEvent',
   'status',
   'tick',
+  'validateSpec',
 ].sort();
 
 describe('package root barrel', () => {

@@ -178,6 +178,58 @@ describe('runCommand (black-box command layer)', () => {
       expect(second.exitCode).toBe(1);
       expect(second.stderr).toMatch(/already planted/i);
     });
+
+    it('plants from --spec without ever calling the brain — the credential-less path', async () => {
+      let compileCalls = 0;
+      const { ports, relay } = fakedPorts({
+        compile: () => {
+          compileCalls += 1;
+          return compiledSpec;
+        },
+      });
+      const identity = deriveDimensionIdentity(MNEMONIC, 20);
+
+      const result = await runCommand(
+        [
+          'plant',
+          'indie game dev scene',
+          '--mnemonic',
+          MNEMONIC,
+          '--index',
+          '20',
+          '--spec',
+          JSON.stringify(compiledSpec),
+        ],
+        ports
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(compileCalls).toBe(0);
+      const published = await relay.readBack({ authors: [identity.pubkey] });
+      expect(published).toHaveLength(3);
+    });
+
+    it('rejects malformed --spec JSON without touching any port', async () => {
+      const { ports, relay } = fakedPorts({ compile: () => compiledSpec });
+
+      const result = await runCommand(
+        [
+          'plant',
+          'indie game dev scene',
+          '--mnemonic',
+          MNEMONIC,
+          '--index',
+          '21',
+          '--spec',
+          '{not json',
+        ],
+        ports
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/--spec/i);
+      expect(await relay.readBack({})).toEqual([]);
+    });
   });
 
   describe('tick', () => {

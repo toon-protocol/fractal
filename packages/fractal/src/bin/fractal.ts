@@ -3,7 +3,7 @@ import { runCommand } from '../command.js';
 import type { Ports } from '../command.js';
 import type { BelowPort } from '../ports/below.js';
 import type { RelayPort } from '../ports/relay.js';
-import type { BrainPort } from '../ports/brain.js';
+import { ClaudeBrain } from '../claude-brain.js';
 
 function notWired(port: string): never {
   throw new Error(
@@ -17,11 +17,12 @@ const relay: RelayPort = {
   readBack: () => notWired('Relay'),
   quoteFee: () => notWired('Relay'),
 };
-const brain: BrainPort = {
-  compile: () => notWired('Brain'),
-  interpret: () => notWired('Brain'),
-  adapt: () => notWired('Brain'),
-};
+// The real Brain port: headless Claude behind the same interface every other
+// port uses. With no credentials it still constructs cleanly — mechanical
+// commands and `plant --spec` never touch it — and throws a clear,
+// actionable error only when a brain-requiring call is actually made
+// (CONTEXT.md — Brain, Hands; fractal#33).
+const brain = new ClaudeBrain();
 
 const ports: Ports = { below, relay, brain };
 const result = await runCommand(process.argv.slice(2), ports);

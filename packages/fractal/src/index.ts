@@ -9,6 +9,8 @@ export * from './status.js';
 export * from './amend.js';
 export * from './relay-pool.js';
 export * from './toon-relay.js';
+export * from './headless-claude.js';
+export * from './claude-brain.js';
 export * from './ports/index.js';
 export * from './fakes/index.js';
 export * from './adapters/index.js';

@@ -1,5 +1,5 @@
 import { deriveDimensionIdentity, signEvent } from './identity.js';
-import { resolveRelaySet } from './domain/spec.js';
+import { resolveRelaySet, validateSpec } from './domain/spec.js';
 import type { DimensionSpec } from './domain/spec.js';
 import type { Seed } from './domain/seed.js';
 import type { BrainPort } from './ports/brain.js';
@@ -16,6 +16,12 @@ export interface PlantRequest {
   readonly utterance: string;
   readonly mnemonic: string;
   readonly index: number;
+  /**
+   * Bypasses the brain entirely when present — the credential-less path: an
+   * operator-supplied spec skips `ports.brain.compile`, so a Brain port with
+   * no credentials never gets called (CONTEXT.md — Hands, Brain).
+   */
+  readonly spec?: DimensionSpec;
 }
 
 export interface PlantResult {
@@ -59,7 +65,17 @@ export async function plant(
     plantedAt: new Date().toISOString(),
   };
 
-  const compiled = await ports.brain.compile({ seed });
+  const candidate = request.spec ?? (await ports.brain.compile({ seed }));
+  const validation = validateSpec(candidate);
+  if (!validation.ok) {
+    throw new Error(
+      `fractal: ${
+        request.spec ? 'the --spec you provided' : "the brain's compiled spec"
+      } is invalid — ${validation.reasons.join('; ')} — nothing was published`
+    );
+  }
+  const compiled = validation.spec;
+
   const budgetCap = ports.relay.fundChannel
     ? await ports.relay.fundChannel(compiled.budgetCap)
     : compiled.budgetCap;
