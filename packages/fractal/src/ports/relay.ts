@@ -32,7 +32,30 @@ export interface ReadBackQuery {
   readonly limit?: number;
 }
 
+/**
+ * Thrown by `publish` when the write would spend past the funded channel's
+ * balance. An implementation backed by a real channel raises this *before*
+ * attempting the paid write, so an over-balance write is unrepresentable
+ * rather than merely rejected after the fact (CONTEXT.md — Dimension
+ * identity, "budget cap is the channel balance, enforced by construction").
+ * Part of the port contract, not of any one implementation: `tick` withholds
+ * the refused candidate instead of aborting, whichever relay refused it.
+ */
+export class ChannelBudgetExceededError extends Error {
+  constructor(
+    readonly channelId: string,
+    readonly attempted: bigint,
+    readonly available: bigint
+  ) {
+    super(
+      `fractal: publish would spend ${attempted} on channel ${channelId}, exceeding its ${available} available balance — refused before any paid write was attempted`
+    );
+    this.name = 'ChannelBudgetExceededError';
+  }
+}
+
 export interface RelayPort {
+  /** Throws `ChannelBudgetExceededError` when the channel cannot fund this write. */
   publish(request: PublishRequest): Promise<PublishResult>;
   readBack(query: ReadBackQuery): Promise<readonly RelaySignedEvent[]>;
   /**

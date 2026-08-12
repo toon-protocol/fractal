@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   ToonRelay,
-  ChannelBudgetExceededError,
   type ToonPublishClient,
   type NostrReadClient,
 } from './toon-relay.js';
 import type { NostrEvent } from 'nostr-tools/pure';
+import { ChannelBudgetExceededError } from './ports/relay.js';
 import type { RelaySignedEvent } from './ports/relay.js';
 
 function signedEvent(

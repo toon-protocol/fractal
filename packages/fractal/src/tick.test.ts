@@ -8,7 +8,7 @@ import { FixtureBelow } from './fakes/fixture-below.js';
 import { ScriptedBrain } from './fakes/scripted-brain.js';
 import { deriveDimensionIdentity, signEvent } from './identity.js';
 import { FEED_RESOURCE } from './adapters/feed.js';
-import { ChannelBudgetExceededError } from './toon-relay.js';
+import { ChannelBudgetExceededError } from './ports/relay.js';
 import type { DimensionSpec, SourceConfig } from './domain/spec.js';
 import type {
   PublishRequest,
@@ -23,6 +23,13 @@ const MNEMONIC =
 
 const HN_SOURCE: SourceConfig = {
   id: 'hn-top',
+  kind: 'hn',
+  endpoint: 'https://hacker-news.example/api',
+};
+
+/** The single-source spec every budget-accounting scenario below plants against. */
+const BUDGET_SOURCE: SourceConfig = {
+  id: 'hn-budget',
   kind: 'hn',
   endpoint: 'https://hacker-news.example/api',
 };
@@ -242,12 +249,6 @@ describe('tick', () => {
 });
 
 describe('tick — budget accounting & cap enforcement', () => {
-  const BUDGET_SOURCE: SourceConfig = {
-    id: 'hn-budget',
-    kind: 'hn',
-    endpoint: 'https://hacker-news.example/api',
-  };
-
   async function plantedBudgetDimension(
     index: number,
     budgetCap: number,
@@ -515,12 +516,6 @@ async function plantOnto(
 }
 
 describe('tick — reconciles budget accounting against the reported fee', () => {
-  const BUDGET_SOURCE: SourceConfig = {
-    id: 'hn-budget',
-    kind: 'hn',
-    endpoint: 'https://hacker-news.example/api',
-  };
-
   it('accounts spend from the fee publish actually reports, not the quote it previewed', async () => {
     const relay = new ReportedFeeRelay(3, 7);
     await plantOnto(relay, 60, 1000, [BUDGET_SOURCE]);
@@ -562,12 +557,6 @@ describe('tick — reconciles budget accounting against the reported fee', () =>
 });
 
 describe('tick — budget accounting is sourced from the channel claim', () => {
-  const BUDGET_SOURCE: SourceConfig = {
-    id: 'hn-budget',
-    kind: 'hn',
-    endpoint: 'https://hacker-news.example/api',
-  };
-
   it("counts plant's identity events, which the channel charged for but no tick report ever recorded", async () => {
     const relay = new ChanneledRelay(100);
     await plantOnto(relay, 70, 100, [BUDGET_SOURCE]);

@@ -10,12 +10,12 @@ import {
   dittoedResourceUrls,
 } from './relay-reads.js';
 import type { BelowPort } from './ports/below.js';
+import { ChannelBudgetExceededError } from './ports/relay.js';
 import type {
   PublishResult,
   RelayPort,
   RelaySignedEvent,
 } from './ports/relay.js';
-import { ChannelBudgetExceededError } from './toon-relay.js';
 
 /**
  * The per-tick economics log: not a ditto or interpretation, so it never

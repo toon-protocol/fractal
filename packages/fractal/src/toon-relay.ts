@@ -2,6 +2,7 @@ import type { NostrEvent } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools/filter';
 import type { SimplePool } from 'nostr-tools/pool';
 import type { ToonClient } from '@toon-protocol/client';
+import { ChannelBudgetExceededError } from './ports/relay.js';
 import type {
   PublishRequest,
   PublishResult,
@@ -44,26 +45,6 @@ export interface ToonRelayOptions {
   readonly destination?: string;
   /** Flat ILP amount (base units) charged per published event. Defaults to 1n. */
   readonly pricePerEvent?: bigint;
-}
-
-/**
- * Thrown when a publish would spend past the funded channel's balance. The
- * write is refused here, before `publishClient.publishEvent` is ever called
- * — an over-balance write is unrepresentable, not merely rejected after a
- * failed paid attempt (CONTEXT.md — Dimension identity, "budget cap is the
- * channel balance, enforced by construction").
- */
-export class ChannelBudgetExceededError extends Error {
-  constructor(
-    readonly channelId: string,
-    readonly attempted: bigint,
-    readonly available: bigint
-  ) {
-    super(
-      `fractal: publish would spend ${attempted} on channel ${channelId}, exceeding its ${available} available balance — refused before any paid write was attempted`
-    );
-    this.name = 'ChannelBudgetExceededError';
-  }
 }
 
 function toNostrEvent(event: RelaySignedEvent): NostrEvent {
@@ -159,19 +140,31 @@ export class ToonRelay implements RelayPort {
     return Number(this.publishClient.getChannelCumulativeAmount(channelId));
   }
 
+  /**
+   * The paid write. The channel's live balance is checked first, so a write
+   * the channel cannot fund is refused before `publishEvent` is ever called
+   * — enforced by construction, independent of whatever the caller already
+   * quoted. The reported fee is the claim's real movement, not the amount
+   * asked for, so budget accounting reconciles against what was actually
+   * paid (CONTEXT.md — Dimension identity).
+   */
   async publish(request: PublishRequest): Promise<PublishResult> {
     const channelId = await this.resolveChannel();
     const before = this.publishClient.getChannelCumulativeAmount(channelId);
     const deposit = this.publishClient.getChannelDepositTotal(channelId);
-    const fee = this.pricePerEvent;
+    const ilpAmount = this.pricePerEvent;
 
-    if (before + fee > deposit) {
-      throw new ChannelBudgetExceededError(channelId, fee, deposit - before);
+    if (before + ilpAmount > deposit) {
+      throw new ChannelBudgetExceededError(
+        channelId,
+        ilpAmount,
+        deposit - before
+      );
     }
 
     const result = await this.publishClient.publishEvent(
       toNostrEvent(request.event),
-      { destination: this.destination, ilpAmount: fee }
+      { destination: this.destination, ilpAmount }
     );
     if (!result.success) {
       throw new Error(
