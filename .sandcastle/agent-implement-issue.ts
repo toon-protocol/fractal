@@ -33,6 +33,17 @@
 //   CLAUDE_CODE_OAUTH_TOKEN   Claude Max-plan credential (org secret)
 //   GH_TOKEN                  token with contents:write + pull-requests:write +
 //                             issues:write (the App token in CI)
+//   APP_ID, APP_PRIVATE_KEY   the same GitHub App the workflow mints GH_TOKEN
+//                             from. Used to mint a FRESH token immediately
+//                             before each push, because installation tokens
+//                             expire after one hour and long runs pushed with a
+//                             dead credential (toon-meta#248/connector#462) —
+//                             see ./mint-app-token.ts. HOST ONLY: the private
+//                             key is deliberately absent from PASSTHROUGH_KEYS
+//                             in ./sandbox-secrets.ts, so it never enters the
+//                             sandbox container. Optional — without it the
+//                             runner falls back to the ambient GH_TOKEN and
+//                             the old expiry behaviour.
 //
 // Usage:
 //   SANDCASTLE_ISSUE_NUMBER=123 npx tsx .sandcastle/agent-implement-issue.ts
@@ -43,6 +54,7 @@ import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { sandboxSecrets } from "./sandbox-secrets.ts";
 import { openPrWithRetry } from "./pr-open.ts";
+import { mintAppToken } from "./mint-app-token.ts";
 import {
   resolveFactoryOpsIdentity,
   runReviewerWithVerdict,
@@ -120,6 +132,111 @@ const hooks = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Pushing with a credential that is fresh AT THE MOMENT OF THE PUSH
+// (toon-meta#248, ported from connector#462/#463)
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the fresh token is staged inside the container: mode 600 from creation,
+ * and deleted as soon as the push that needs it is done.
+ */
+const TOKEN_PATH = "/tmp/.sandcastle-push-token";
+
+// Git credential helper that reads the token from TOKEN_PATH at push time.
+//
+// The leading `!` makes git run this as a shell snippet. The empty
+// `credential.helper=` that precedes it on the command line is load-bearing: git
+// treats credential.helper as a MULTI-VALUED config key and an empty value
+// RESETS the list, which is what stops `gh auth setup-git`'s container-global
+// helper (wired in onSandboxReady above, and holding the STALE token from
+// container start) from being consulted first and winning.
+//
+// The token reaches the container via `stdin`, and is read back from a file
+// rather than interpolated into the command, so it appears in no argv, no
+// process listing, and no captured log line.
+const FRESH_CREDENTIAL_HELPER =
+  `!f() { test "$1" = get && ` +
+  `{ echo username=x-access-token; echo "password=$(cat ${TOKEN_PATH})"; }; }; f`;
+
+/**
+ * Push `branch` from inside the sandbox using a newly-minted App token.
+ *
+ * Also refreshes the HOST's `GH_TOKEN` from the same mint, because the host `gh`
+ * calls that follow (`pr list`, `pr create`, `api`) authenticate from
+ * `process.env` and expire on exactly the same one-hour clock.
+ *
+ * `bestEffort` is for the early publish after the implementer phase: a failure
+ * there costs us recoverability but must not abandon a run that still has a
+ * review phase to do. The final push is never best-effort — it fails loud.
+ */
+async function pushBranch(
+  sandbox: sandcastle.Sandbox,
+  label: string,
+  { bestEffort = false }: { bestEffort?: boolean } = {},
+): Promise<boolean> {
+  // Every failure below is EITHER a warning that returns false (best-effort)
+  // OR a throw — the same decision each time, so it lives in one place rather
+  // than being restated at each failure site.
+  const fail = (reason: string): false => {
+    const message = `[${label}] ${reason}`;
+    if (!bestEffort) throw new Error(message);
+    console.warn(`  WARNING: ${message}`);
+    return false;
+  };
+
+  let token: string;
+  try {
+    const minted = await mintAppToken();
+    token = minted.token;
+    // Keep the host in step with the container.
+    process.env.GH_TOKEN = token;
+    console.log(
+      minted.source === "app"
+        ? `  [${label}] credential: freshly minted App installation token`
+        : `  [${label}] credential: ambient GH_TOKEN (no APP_ID/` +
+            `APP_PRIVATE_KEY — subject to the one-hour expiry)`,
+    );
+  } catch (err) {
+    return fail(
+      "could not obtain a push credential: " +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  try {
+    // `umask 077` so the file is 600 from creation — never briefly
+    // world-readable.
+    const stage = await sandbox.exec(`umask 077 && cat > ${TOKEN_PATH}`, {
+      stdin: token,
+    });
+    if (stage.exitCode !== 0) {
+      return fail(
+        `failed to stage the push credential (exit ${stage.exitCode}).`,
+      );
+    }
+
+    const push = await sandbox.exec(
+      `git -c credential.helper= -c credential.helper='${FRESH_CREDENTIAL_HELPER}' ` +
+        `push -u origin ${branch}`,
+      { onLine: (line) => console.log(`  [${label}] ${line}`) },
+    );
+    if (push.exitCode !== 0) {
+      return fail(
+        `git push of '${branch}' failed (exit ${push.exitCode}).\n` +
+          `${push.stderr}`,
+      );
+    }
+    return true;
+  } finally {
+    // The staging step is inside this `try` so that a partially-written token
+    // file is cleaned up too, not just the one a completed push consumed.
+    // Do not leave a usable credential on disk in the container for the agent
+    // phases that follow.
+    await sandbox.exec(`rm -f ${TOKEN_PATH}`);
+  }
+}
+
 console.log(
   `\n=== agent:implement runner — issue #${issueNumber} "${issueTitle}" ===`,
 );
@@ -172,6 +289,21 @@ try {
     process.exit(0);
   }
 
+  // PUBLISH EARLY (toon-meta#248, ported from connector#462). The implementer
+  // has committed; get those commits onto origin NOW rather than after the
+  // reviewer. Two reasons:
+  //   1. Recoverability — a run that dies during review (timeout, cancellation,
+  //      runner death) leaves the completed implementation on a remote branch
+  //      instead of losing it with the container.
+  //   2. It is the cheapest moment to fail: if push auth is broken we learn it
+  //      here, minutes in, not an hour later.
+  // Best-effort: a failure is a warning, because the review phase is still
+  // worth running and the final push below fails loud.
+  console.log(
+    "\nPublishing the implementer branch early (crash-recovery point).",
+  );
+  await pushBranch(sandbox, "push:early", { bestEffort: true });
+
   // Review (opus, 1 iteration) on the SAME branch, with the structured
   // verdict REQUIRED (toon-meta#275): the reviewer receives the issue via
   // promptArgs (Spec axis — it reviews against the issue's acceptance
@@ -221,16 +353,15 @@ try {
     // there; gh auth setup-git wired the credential helper in onSandboxReady),
     // open the PR from the authenticated HOST. sandbox.exec() surfaces a
     // non-zero exitCode (it does NOT throw) — check it and fail loud.
+    //
+    // The credential is minted fresh here, immediately before the push, so the
+    // run's total length is irrelevant (toon-meta#248). This also refreshes the
+    // host's GH_TOKEN, which the `gh` calls below depend on. The branch was
+    // already pushed once above (push:early) — this push carries any commits
+    // the reviewer phase added since, and is the one that must fail loud.
     console.log("\nPR mode — pushing branch and opening a PR for human review.");
 
-    const push = await sandbox.exec(`git push -u origin ${branch}`, {
-      onLine: (line) => console.log(`  [push] ${line}`),
-    });
-    if (push.exitCode !== 0) {
-      throw new Error(
-        `git push of '${branch}' failed (exit ${push.exitCode}).\n${push.stderr}`,
-      );
-    }
+    await pushBranch(sandbox, "push:final");
 
     // Bounded retry + idempotency (fractal#22) — see pr-open.ts for the full
     // rationale: a transient GitHub API failure here must not discard the
@@ -277,8 +408,9 @@ try {
       openPrVerificationError =
         `\nERROR: gh pr create did not succeed for branch '${branch}' after ` +
         `exhausting retries.\n` +
-        `  The branch IS pushed to origin and the implement+review cycle ` +
-        `completed successfully — nothing is lost.\n` +
+        `  The branch IS pushed to origin (published early after the ` +
+        `implementer phase, then again just now) and the implement+review ` +
+        `cycle completed successfully — nothing is lost.\n` +
         `  Re-run this exact command once GitHub recovers:\n` +
         `    ${openPr.recoveryCommand}\n` +
         `  (Or just re-run this job: the branch is reused, and the ` +
