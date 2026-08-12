@@ -11,9 +11,10 @@ import type {
 } from './ports/brain.js';
 
 /**
- * How many times an invalid compile/adapt candidate is kicked back to the
- * model before the brain gives up. Explicit and tested — persistent failure
- * must surface a clear error, never a half-planted dimension (fractal#33).
+ * How many compile/adapt attempts the brain makes in total — the first try
+ * plus the kick-backs that follow an invalid candidate — before it gives up.
+ * Explicit and tested — persistent failure must surface a clear error, never
+ * a half-planted dimension (fractal#33).
  */
 export const MAX_SPEC_ATTEMPTS = 3;
 
@@ -74,40 +75,50 @@ const DIMENSION_SPEC_JSON_SCHEMA: Record<string, unknown> = {
   },
 };
 
-function buildCompilePrompt(
-  seed: Seed,
-  previousReasons?: readonly string[]
+/**
+ * The kick-back itself: a rejected candidate goes back to the model with the
+ * reasons it failed validation. No reasons — the first attempt — leaves the
+ * prompt untouched.
+ */
+function withRejectionNote(
+  prompt: string,
+  previousReasons: readonly string[]
 ): string {
-  const base = [
-    "You are fractal's compile skill: turn one operator seed utterance into a DimensionSpec.",
-    `Seed utterance: "${seed.utterance}"`,
-    'Choose real-world, read-only API sources (id, kind, endpoint) that fit the seed; NIP mappings (nip, kind) for the events those sources project into; a cadence describing how often the dimension ticks; a positive budgetCap (a count of paid writes the dimension should afford); and a relaySet (an array of wss:// relay URLs, or an empty array to accept the shared default relay).',
-    'Reply with the DimensionSpec JSON only — no prose, no markdown fences.',
-  ].join('\n');
-
-  if (!previousReasons || previousReasons.length === 0) {
-    return base;
+  if (previousReasons.length === 0) {
+    return prompt;
   }
 
-  return `${base}\n\nYour previous reply was rejected: ${previousReasons.join('; ')}. Return corrected JSON only.`;
+  return `${prompt}\n\nYour previous reply was rejected: ${previousReasons.join('; ')}. Return corrected JSON only.`;
+}
+
+function buildCompilePrompt(
+  seed: Seed,
+  previousReasons: readonly string[]
+): string {
+  return withRejectionNote(
+    [
+      "You are fractal's compile skill: turn one operator seed utterance into a DimensionSpec.",
+      `Seed utterance: "${seed.utterance}"`,
+      'Choose real-world, read-only API sources (id, kind, endpoint) that fit the seed; NIP mappings (nip, kind) for the events those sources project into; a cadence describing how often the dimension ticks; a positive budgetCap (a count of paid writes the dimension should afford); and a relaySet (an array of wss:// relay URLs, or an empty array to accept the shared default relay).',
+      'Reply with the DimensionSpec JSON only — no prose, no markdown fences.',
+    ].join('\n'),
+    previousReasons
+  );
 }
 
 function buildAdaptPrompt(
   request: AdaptRequest,
-  previousReasons?: readonly string[]
+  previousReasons: readonly string[]
 ): string {
-  const base = [
-    "You are fractal's adaptation moment: revise a living dimension's spec.",
-    `Reason for revision: ${request.reason}`,
-    `Current spec:\n${JSON.stringify(request.spec)}`,
-    'Reply with the complete revised DimensionSpec JSON only — no prose, no markdown fences.',
-  ].join('\n');
-
-  if (!previousReasons || previousReasons.length === 0) {
-    return base;
-  }
-
-  return `${base}\n\nYour previous reply was rejected: ${previousReasons.join('; ')}. Return corrected JSON only.`;
+  return withRejectionNote(
+    [
+      "You are fractal's adaptation moment: revise a living dimension's spec.",
+      `Reason for revision: ${request.reason}`,
+      `Current spec:\n${JSON.stringify(request.spec)}`,
+      'Reply with the complete revised DimensionSpec JSON only — no prose, no markdown fences.',
+    ].join('\n'),
+    previousReasons
+  );
 }
 
 function buildInterpretPrompt(request: InterpretRequest): string {
@@ -192,13 +203,13 @@ export class ClaudeBrain implements BrainPort {
   }
 
   private async resolveSpecWithRetry(
-    buildPrompt: (previousReasons?: readonly string[]) => string
+    buildPrompt: (previousReasons: readonly string[]) => string
   ): Promise<DimensionSpec> {
     let reasons: readonly string[] = [];
 
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
       const result = await this.runQuery({
-        prompt: buildPrompt(reasons.length > 0 ? reasons : undefined),
+        prompt: buildPrompt(reasons),
         model: this.model,
         jsonSchema: DIMENSION_SPEC_JSON_SCHEMA,
       });

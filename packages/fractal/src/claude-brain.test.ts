@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ClaudeBrain, MAX_SPEC_ATTEMPTS } from './claude-brain.js';
+import {
+  ClaudeBrain,
+  hasHeadlessClaudeCredentials,
+  MAX_SPEC_ATTEMPTS,
+} from './claude-brain.js';
 import type { HeadlessQuery, HeadlessQueryResult } from './headless-claude.js';
 import type { DimensionSpec } from './domain/spec.js';
 import type { Seed } from './domain/seed.js';
@@ -175,5 +179,21 @@ describe('ClaudeBrain', () => {
       );
       expect(query).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('hasHeadlessClaudeCredentials', () => {
+  it('accepts either supported credential', () => {
+    expect(hasHeadlessClaudeCredentials({ ANTHROPIC_API_KEY: 'sk-test' })).toBe(
+      true
+    );
+    expect(
+      hasHeadlessClaudeCredentials({ CLAUDE_CODE_OAUTH_TOKEN: 'token' })
+    ).toBe(true);
+  });
+
+  it('rejects an environment with neither, or with an empty value', () => {
+    expect(hasHeadlessClaudeCredentials({})).toBe(false);
+    expect(hasHeadlessClaudeCredentials({ ANTHROPIC_API_KEY: '' })).toBe(false);
   });
 });
