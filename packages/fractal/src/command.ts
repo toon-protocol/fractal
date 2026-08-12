@@ -150,9 +150,19 @@ function parsePlantArgv(argv: readonly string[]): ParsedPlantArgs {
     return parsed;
   }
 
+  const specRaw = findFlagValue(flags, '--spec');
+  let spec: DimensionSpec | undefined;
+  if (specRaw !== undefined) {
+    try {
+      spec = JSON.parse(specRaw) as DimensionSpec;
+    } catch {
+      return { ok: false, error: 'fractal plant: --spec must be valid JSON\n' };
+    }
+  }
+
   return {
     ok: true,
-    args: { utterance, mnemonic: parsed.mnemonic, index: parsed.index },
+    args: { utterance, mnemonic: parsed.mnemonic, index: parsed.index, spec },
   };
 }
 

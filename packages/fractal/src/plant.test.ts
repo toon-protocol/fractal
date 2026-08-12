@@ -176,4 +176,96 @@ describe('plant', () => {
 
     expect(result.spec.budgetCap).toBe(compiledSpec.budgetCap);
   });
+
+  it('leaves no half-planted dimension when the brain persistently fails to compile', async () => {
+    const relay = new InMemoryRelay();
+    const brain = new ScriptedBrain({
+      compile: () => {
+        throw new Error('fractal: brain gave up after 3 attempt(s)');
+      },
+    });
+    const identity = deriveDimensionIdentity(MNEMONIC, 6);
+
+    await expect(
+      plant(
+        { utterance: 'indie game dev scene', mnemonic: MNEMONIC, index: 6 },
+        { relay, brain }
+      )
+    ).rejects.toThrow(/gave up/i);
+
+    expect(await relay.readBack({ authors: [identity.pubkey] })).toEqual([]);
+  });
+
+  it('leaves no half-planted dimension when the brain compiles a structurally invalid spec', async () => {
+    const relay = new InMemoryRelay();
+    const brain = new ScriptedBrain({
+      compile: () => ({ ...compiledSpec, sources: [] }),
+    });
+    const identity = deriveDimensionIdentity(MNEMONIC, 7);
+
+    await expect(
+      plant(
+        { utterance: 'indie game dev scene', mnemonic: MNEMONIC, index: 7 },
+        { relay, brain }
+      )
+    ).rejects.toThrow(/invalid/i);
+
+    expect(await relay.readBack({ authors: [identity.pubkey] })).toEqual([]);
+  });
+
+  it('plants from an explicit spec, never calling the brain — the credential-less path', async () => {
+    const relay = new InMemoryRelay();
+    let compileCalls = 0;
+    const brain = new ScriptedBrain({
+      compile: () => {
+        compileCalls += 1;
+        return compiledSpec;
+      },
+    });
+    const identity = deriveDimensionIdentity(MNEMONIC, 8);
+    const explicitSpec: DimensionSpec = { ...compiledSpec, budgetCap: 42 };
+
+    const result = await plant(
+      {
+        utterance: 'indie game dev scene',
+        mnemonic: MNEMONIC,
+        index: 8,
+        spec: explicitSpec,
+      },
+      { relay, brain }
+    );
+
+    expect(compileCalls).toBe(0);
+    expect(result.spec).toEqual(explicitSpec);
+    const published = await relay.readBack({ authors: [identity.pubkey] });
+    expect(published).toHaveLength(3);
+  });
+
+  it('rejects a structurally invalid explicit spec without touching the brain or publishing', async () => {
+    const relay = new InMemoryRelay();
+    let compileCalls = 0;
+    const brain = new ScriptedBrain({
+      compile: () => {
+        compileCalls += 1;
+        return compiledSpec;
+      },
+    });
+    const identity = deriveDimensionIdentity(MNEMONIC, 9);
+    const invalidSpec = { ...compiledSpec, budgetCap: -1 } as DimensionSpec;
+
+    await expect(
+      plant(
+        {
+          utterance: 'indie game dev scene',
+          mnemonic: MNEMONIC,
+          index: 9,
+          spec: invalidSpec,
+        },
+        { relay, brain }
+      )
+    ).rejects.toThrow(/--spec you provided.*invalid/i);
+
+    expect(compileCalls).toBe(0);
+    expect(await relay.readBack({ authors: [identity.pubkey] })).toEqual([]);
+  });
 });
