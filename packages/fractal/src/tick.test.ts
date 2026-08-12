@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { verifyEvent } from 'nostr-tools/pure';
-import { tick } from './tick.js';
+import { tick, TICK_REPORT_EVENT_KIND } from './tick.js';
 import { plant } from './plant.js';
 import { SPEC_EVENT_KIND } from './plant.js';
 import { InMemoryRelay } from './fakes/in-memory-relay.js';
@@ -8,13 +8,28 @@ import { FixtureBelow } from './fakes/fixture-below.js';
 import { ScriptedBrain } from './fakes/scripted-brain.js';
 import { deriveDimensionIdentity, signEvent } from './identity.js';
 import { FEED_RESOURCE } from './adapters/feed.js';
+import { ChannelBudgetExceededError } from './ports/relay.js';
 import type { DimensionSpec, SourceConfig } from './domain/spec.js';
+import type {
+  PublishRequest,
+  PublishResult,
+  ReadBackQuery,
+  RelayPort,
+  RelaySignedEvent,
+} from './ports/relay.js';
 
 const MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
 const HN_SOURCE: SourceConfig = {
   id: 'hn-top',
+  kind: 'hn',
+  endpoint: 'https://hacker-news.example/api',
+};
+
+/** The single-source spec every budget-accounting scenario below plants against. */
+const BUDGET_SOURCE: SourceConfig = {
+  id: 'hn-budget',
   kind: 'hn',
   endpoint: 'https://hacker-news.example/api',
 };
@@ -234,12 +249,6 @@ describe('tick', () => {
 });
 
 describe('tick — budget accounting & cap enforcement', () => {
-  const BUDGET_SOURCE: SourceConfig = {
-    id: 'hn-budget',
-    kind: 'hn',
-    endpoint: 'https://hacker-news.example/api',
-  };
-
   async function plantedBudgetDimension(
     index: number,
     budgetCap: number,
@@ -370,5 +379,280 @@ describe('tick — budget accounting & cap enforcement', () => {
     expect(second.published).toHaveLength(1);
     expect(second.withheld).toEqual([]);
     expect(second.budgetRemaining).toBe(100 - 2 * 3);
+  });
+});
+
+/**
+ * A `RelayPort` whose `quoteFee` preview diverges from the fee `publish`
+ * actually reports for the same request — standing in for a real client
+ * whose claim movement disagrees with fractal's own price quote (e.g. a
+ * connector charging more than requested).
+ */
+class ReportedFeeRelay implements RelayPort {
+  private readonly inner = new InMemoryRelay();
+
+  constructor(
+    private readonly quotedFee: number,
+    private readonly reportedFee: number
+  ) {}
+
+  async publish(request: PublishRequest): Promise<PublishResult> {
+    const result = await this.inner.publish(request);
+    return { ...result, fee: this.reportedFee };
+  }
+
+  async readBack(query: ReadBackQuery): Promise<readonly RelaySignedEvent[]> {
+    return this.inner.readBack(query);
+  }
+
+  async quoteFee(_request: PublishRequest): Promise<number> {
+    return this.quotedFee;
+  }
+}
+
+/**
+ * A `RelayPort` whose channel-balance backstop refuses the `n`th ditto
+ * publish (kind 1, the fixtures' projected candidate kind) with
+ * `ChannelBudgetExceededError` — standing in for `ToonRelay`'s real
+ * enforced-by-construction refusal on a request a caller's own quote-based
+ * pre-check already let through.
+ */
+class BudgetExceedingRelay implements RelayPort {
+  private readonly inner = new InMemoryRelay();
+  private dittoPublishes = 0;
+
+  constructor(private readonly failOnDittoNumber: number) {}
+
+  async publish(request: PublishRequest): Promise<PublishResult> {
+    if (request.event.kind === 1) {
+      this.dittoPublishes += 1;
+      if (this.dittoPublishes === this.failOnDittoNumber) {
+        throw new ChannelBudgetExceededError('channel-1', 1n, 0n);
+      }
+    }
+    return this.inner.publish(request);
+  }
+
+  async readBack(query: ReadBackQuery): Promise<readonly RelaySignedEvent[]> {
+    return this.inner.readBack(query);
+  }
+
+  async quoteFee(_request: PublishRequest): Promise<number> {
+    return 1;
+  }
+}
+
+/**
+ * A `RelayPort` backed by a fixed channel deposit that charges EVERY publish
+ * — `plant`'s three identity events, every ditto and every tick report alike
+ * — and refuses any write past that deposit, exactly as `ToonRelay`'s
+ * enforced-by-construction backstop does against a real funded channel. Its
+ * `channelSpend` is the running claim, so budget accounting reads the same
+ * number the channel enforces.
+ */
+class ChanneledRelay implements RelayPort {
+  private readonly inner = new InMemoryRelay();
+  private claim = 0;
+
+  constructor(
+    private readonly deposit: number,
+    private readonly pricePerEvent = 1
+  ) {}
+
+  async publish(request: PublishRequest): Promise<PublishResult> {
+    if (this.claim + this.pricePerEvent > this.deposit) {
+      throw new ChannelBudgetExceededError(
+        'channel-1',
+        BigInt(this.pricePerEvent),
+        BigInt(this.deposit - this.claim)
+      );
+    }
+    const result = await this.inner.publish(request);
+    this.claim += this.pricePerEvent;
+    return { ...result, fee: this.pricePerEvent };
+  }
+
+  async readBack(query: ReadBackQuery): Promise<readonly RelaySignedEvent[]> {
+    return this.inner.readBack(query);
+  }
+
+  async quoteFee(_request: PublishRequest): Promise<number> {
+    return this.pricePerEvent;
+  }
+
+  async channelSpend(): Promise<number> {
+    return this.claim;
+  }
+
+  async fundChannel(_desiredCap: number): Promise<number> {
+    return this.deposit;
+  }
+
+  /** The claim, as the test sees it. */
+  get spend(): number {
+    return this.claim;
+  }
+}
+
+async function plantOnto(
+  relay: RelayPort,
+  index: number,
+  budgetCap: number,
+  sources: readonly SourceConfig[]
+): Promise<void> {
+  const brain = new ScriptedBrain({
+    compile: () => ({
+      sources,
+      nipMappings: [{ nip: 'NIP-01', kind: 1 }],
+      cadence: 'hourly',
+      budgetCap,
+      relaySet: ['wss://relay.example'],
+    }),
+  });
+  await plant(
+    { utterance: 'hn roguelike scene', mnemonic: MNEMONIC, index },
+    { relay, brain }
+  );
+}
+
+describe('tick — reconciles budget accounting against the reported fee', () => {
+  it('accounts spend from the fee publish actually reports, not the quote it previewed', async () => {
+    const relay = new ReportedFeeRelay(3, 7);
+    await plantOnto(relay, 60, 1000, [BUDGET_SOURCE]);
+    const below = new FixtureBelow({
+      fixtures: fixturesFor(BUDGET_SOURCE, HN_PAYLOAD),
+    });
+
+    const result = await tick(
+      { mnemonic: MNEMONIC, index: 60 },
+      { below, relay }
+    );
+
+    expect(result.published).toHaveLength(2);
+    expect(result.feesPaid).toBe(2 * 7);
+    expect(result.budgetRemaining).toBe(1000 - 2 * 7);
+  });
+
+  it('withholds a publish the channel balance backstop refuses instead of throwing out of tick', async () => {
+    const relay = new BudgetExceedingRelay(2);
+    await plantOnto(relay, 61, 1000, [BUDGET_SOURCE]);
+    const below = new FixtureBelow({
+      fixtures: fixturesFor(BUDGET_SOURCE, HN_PAYLOAD),
+    });
+
+    const result = await tick(
+      { mnemonic: MNEMONIC, index: 61 },
+      { below, relay }
+    );
+
+    expect(result.published).toHaveLength(1);
+    expect(result.withheld).toHaveLength(1);
+    expect(result.feesPaid).toBe(1);
+
+    const reportEvents = await relay.readBack({
+      kinds: [TICK_REPORT_EVENT_KIND],
+    });
+    expect(reportEvents).toHaveLength(1);
+  });
+});
+
+describe('tick — budget accounting is sourced from the channel claim', () => {
+  it("counts plant's identity events, which the channel charged for but no tick report ever recorded", async () => {
+    const relay = new ChanneledRelay(100);
+    await plantOnto(relay, 70, 100, [BUDGET_SOURCE]);
+    expect(relay.spend).toBe(3); // profile + seed + spec
+
+    const below = new FixtureBelow({
+      fixtures: fixturesFor(BUDGET_SOURCE, HN_PAYLOAD),
+    });
+    const result = await tick(
+      { mnemonic: MNEMONIC, index: 70 },
+      { below, relay }
+    );
+
+    expect(result.published).toHaveLength(2);
+    expect(result.feesPaid).toBe(2);
+    // 3 identity events + 2 dittos are already on the claim when the report
+    // is written; `spent` tracks the claim, so the remaining budget is not
+    // overstated by the writes the ditto loop did not itself make.
+    expect(result.budgetRemaining).toBe(100 - 5);
+    expect(result.reportPublished).toBe(true);
+    expect(relay.spend).toBe(6); // …plus the report itself
+  });
+
+  it('an exhausted channel withholds the tick report instead of throwing out of tick', async () => {
+    // The reviewed failure exactly: funded to 5, price 1 — plant burns 3, the
+    // ditto loop spends the last 2, and the report has nothing left to pay
+    // with. `budgetCap` is the channel balance (fundChannel), so the loop
+    // stops itself at 5 rather than running past the channel's hard cap.
+    const relay = new ChanneledRelay(5);
+    await plantOnto(relay, 71, 5, [BUDGET_SOURCE]);
+    const below = new FixtureBelow({
+      fixtures: fixturesFor(BUDGET_SOURCE, HN_PAYLOAD),
+    });
+
+    const result = await tick(
+      { mnemonic: MNEMONIC, index: 71 },
+      { below, relay }
+    );
+
+    expect(result.published).toHaveLength(2);
+    expect(result.feesPaid).toBe(2);
+    expect(result.budgetRemaining).toBe(0);
+    expect(result.reportPublished).toBe(false);
+    expect(
+      await relay.readBack({ kinds: [TICK_REPORT_EVENT_KIND] })
+    ).toHaveLength(0);
+    expect(relay.spend).toBe(5);
+  });
+
+  it('the spend total survives a lost report — the next tick reads it off the claim', async () => {
+    const relay = new ChanneledRelay(5);
+    await plantOnto(relay, 72, 5, [BUDGET_SOURCE]);
+    const below = new FixtureBelow({
+      fixtures: fixturesFor(BUDGET_SOURCE, HN_PAYLOAD),
+    });
+
+    const first = await tick(
+      { mnemonic: MNEMONIC, index: 72 },
+      { below, relay }
+    );
+    expect(first.reportPublished).toBe(false);
+
+    // No report to read back, yet the second tick still knows the budget is
+    // gone — it asks the channel, not the (missing) log — and returns
+    // cleanly instead of failing hard on the unpayable report.
+    const second = await tick(
+      { mnemonic: MNEMONIC, index: 72 },
+      { below, relay }
+    );
+
+    expect(second.published).toEqual([]);
+    expect(second.feesPaid).toBe(0);
+    expect(second.budgetRemaining).toBe(0);
+    expect(second.reportPublished).toBe(false);
+    expect(relay.spend).toBe(5);
+  });
+
+  it('withholds gate-passed work rather than attempting a write the channel would refuse', async () => {
+    // Deposit 4, price 1: plant burns 3, so exactly one ditto fits. Because
+    // `spent` starts from the claim (3) rather than 0, the second candidate
+    // is withheld by the loop's own cap check — the channel's backstop is
+    // never the thing that stops it.
+    const relay = new ChanneledRelay(4);
+    await plantOnto(relay, 73, 4, [BUDGET_SOURCE]);
+    const below = new FixtureBelow({
+      fixtures: fixturesFor(BUDGET_SOURCE, HN_PAYLOAD),
+    });
+
+    const result = await tick(
+      { mnemonic: MNEMONIC, index: 73 },
+      { below, relay }
+    );
+
+    expect(result.published).toHaveLength(1);
+    expect(result.withheld).toHaveLength(1);
+    expect(result.budgetRemaining).toBe(0);
+    expect(relay.spend).toBe(4);
   });
 });

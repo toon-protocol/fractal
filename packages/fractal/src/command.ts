@@ -207,6 +207,9 @@ async function runTick(
       budgetRemaining: result.budgetRemaining,
       kickedBack: result.kickedBack,
       withheld: result.withheld,
+      // Only surfaced when it is news: the channel refused to pay for the
+      // tick's own economics report, so the relay carries no log of this tick.
+      ...(result.reportPublished ? {} : { reportPublished: false }),
     };
     return `${result.npub}\n${JSON.stringify(summary, null, 2)}\n`;
   });

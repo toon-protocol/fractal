@@ -14,6 +14,15 @@ import {
 } from './plant.js';
 import { FEED_RESOURCE } from './adapters/feed.js';
 import { INTERPRETATION_EVENT_KIND } from './domain/event.js';
+import { TICK_REPORT_EVENT_KIND } from './tick.js';
+import { ChannelBudgetExceededError } from './ports/relay.js';
+import type {
+  PublishRequest,
+  PublishResult,
+  ReadBackQuery,
+  RelayPort,
+  RelaySignedEvent,
+} from './ports/relay.js';
 import type { DimensionSpec } from './domain/spec.js';
 
 const MNEMONIC =
@@ -38,6 +47,30 @@ function fakedPorts(brainScript: BrainScript = {}): {
     brain: new ScriptedBrain(brainScript),
   };
   return { ports, relay };
+}
+
+/**
+ * A relay whose channel has just enough left for the tick's dittos but not
+ * for the tick's own economics report — standing in for a real channel
+ * refusing that last paid write.
+ */
+class ReportRefusingRelay implements RelayPort {
+  constructor(private readonly inner: InMemoryRelay) {}
+
+  async publish(request: PublishRequest): Promise<PublishResult> {
+    if (request.event.kind === TICK_REPORT_EVENT_KIND) {
+      throw new ChannelBudgetExceededError('channel-1', 1n, 0n);
+    }
+    return this.inner.publish(request);
+  }
+
+  async readBack(query: ReadBackQuery): Promise<readonly RelaySignedEvent[]> {
+    return this.inner.readBack(query);
+  }
+
+  async quoteFee(request: PublishRequest): Promise<number> {
+    return this.inner.quoteFee(request);
+  }
 }
 
 describe('runCommand (black-box command layer)', () => {
@@ -237,6 +270,44 @@ describe('runCommand (black-box command layer)', () => {
       expect(result.stdout).toContain('"feesPaid"');
       expect(result.stdout).toContain('"budgetRemaining"');
       expect(result.stdout).toContain('"withheld": []');
+      // A written report is the unremarkable case, so the summary stays quiet
+      // about it.
+      expect(result.stdout).not.toContain('reportPublished');
+    });
+
+    it('reports that the tick went unlogged when the channel refuses to pay for the tick report', async () => {
+      const relay = new ReportRefusingRelay(new InMemoryRelay());
+      const ports: Ports = {
+        below: new FixtureBelow({
+          fixtures: { [`hn:${FEED_RESOURCE}`]: HN_PAYLOAD },
+        }),
+        relay,
+        brain: new ScriptedBrain({ compile: () => compiledSpec }),
+      };
+      await runCommand(
+        [
+          'plant',
+          'indie game dev scene',
+          '--mnemonic',
+          MNEMONIC,
+          '--index',
+          '23',
+        ],
+        ports
+      );
+
+      const result = await runCommand(
+        ['tick', '--mnemonic', MNEMONIC, '--index', '23'],
+        ports
+      );
+
+      // The ditto still landed — only the tick's own economics log did not.
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('"published": 1');
+      expect(result.stdout).toContain('"reportPublished": false');
+      expect(await relay.readBack({ kinds: [TICK_REPORT_EVENT_KIND] })).toEqual(
+        []
+      );
     });
 
     it('rejects ticking a dimension that has not been planted', async () => {

@@ -6,6 +6,7 @@ export type {
   PublishResult,
   ReadBackQuery,
 } from './relay.js';
+export { ChannelBudgetExceededError } from './relay.js';
 export type {
   BrainPort,
   CompileRequest,
