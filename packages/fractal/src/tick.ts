@@ -20,10 +20,11 @@ import { ChannelBudgetExceededError } from './toon-relay.js';
 /**
  * The per-tick economics log: not a ditto or interpretation, so it never
  * passes through the NIP gate — same exemption plant.ts's own identity
- * events already carry. Its `spent` field is the running total of fees the
- * ditto loop has paid across every tick, so budget enforcement is derived
- * purely from relay read-back, never local state (CONTEXT.md — Ditto loop,
- * "the relay is the state of record").
+ * events already carry. Its `spent` field is the running spend total, so
+ * budget enforcement is derived from relay read-back rather than local
+ * process state (CONTEXT.md — Ditto loop, "the relay is the state of
+ * record"). When the relay port can report its channel's live claim
+ * (`channelSpend`), that claim outranks this field — see `tick`.
  */
 export const TICK_REPORT_EVENT_KIND = 3302;
 
@@ -70,6 +71,12 @@ export interface TickResult {
   readonly withheld: readonly TickWithheld[];
   readonly feesPaid: number;
   readonly budgetRemaining: number;
+  /**
+   * False when the channel refused to pay for the tick's own economics
+   * report. The tick's work still stands, and the spend total is not lost —
+   * it lives on the channel's claim, which the next tick reads back.
+   */
+  readonly reportPublished: boolean;
 }
 
 /**
@@ -93,7 +100,18 @@ export async function tick(
     identity.pubkey,
     TICK_REPORT_EVENT_KIND
   );
-  let spent = previousReport ? previousReport.spent : 0;
+  // The channel's live claim is the authority on what has been spent: it
+  // counts every write the channel funds — plant's three identity events and
+  // each tick report included — which a report-carried tally of ditto fees
+  // alone never sees. Without it, `spent` lags the channel, `budgetRemaining`
+  // over-reports, and the loop runs on until the channel's own hard cap
+  // refuses a write. A port with no channel underneath it (the in-memory
+  // fake) has no claim to read, so the previous report's running total
+  // remains the fallback.
+  const claimSpend = ports.relay.channelSpend
+    ? await ports.relay.channelSpend()
+    : undefined;
+  let spent = claimSpend ?? (previousReport ? previousReport.spent : 0);
   let budgetExhausted = spent >= spec.budgetCap;
   let feesPaidThisTick = 0;
 
@@ -206,7 +224,22 @@ export async function tick(
     tags: [],
     created_at: Math.floor(Date.now() / 1000),
   });
-  await ports.relay.publish({ relaySet: spec.relaySet, event: reportEvent });
+  // The report is a paid write like any other, so an exhausted channel can
+  // refuse it too. Refusing to log is not a reason to fail the tick that
+  // already did its work: the report degrades to "not written" and the tick
+  // still returns. This is only safe because the spend total no longer rides
+  // on the report — a port with a real channel reports its claim above, so
+  // the next tick reads the true spend straight off the channel and picks up
+  // exactly where this one stopped.
+  let reportPublished = true;
+  try {
+    await ports.relay.publish({ relaySet: spec.relaySet, event: reportEvent });
+  } catch (error) {
+    if (!(error instanceof ChannelBudgetExceededError)) {
+      throw error;
+    }
+    reportPublished = false;
+  }
 
   return {
     pubkey: identity.pubkey,
@@ -216,5 +249,6 @@ export async function tick(
     withheld,
     feesPaid: feesPaidThisTick,
     budgetRemaining,
+    reportPublished,
   };
 }

@@ -274,4 +274,30 @@ describe('ToonRelay', () => {
     expect(publishClient.depositToChannel).not.toHaveBeenCalled();
     expect(funded).toBe(100);
   });
+
+  it('reports channel spend from the live claim, counting every write the channel funded', async () => {
+    const publishClient = mockPublishClient({
+      depositTotal: 100n,
+      cumulativeAmount: 3n,
+      cumulativeAdvanceOnPublish: 7n,
+    });
+    const relay = new ToonRelay({
+      publishClient,
+      readClient: mockReadClient(),
+      relayUrls: ['wss://relay.example'],
+      pricePerEvent: 5n,
+    });
+
+    // Writes that happened before this port instance existed (plant's three
+    // identity events, an earlier tick's report) are already on the claim.
+    expect(await relay.channelSpend()).toBe(3);
+
+    await relay.publish({
+      relaySet: ['wss://relay.example'],
+      event: signedEvent(),
+    });
+
+    // …and the claim, not the configured price, is what it grows by.
+    expect(await relay.channelSpend()).toBe(10);
+  });
 });

@@ -147,6 +147,18 @@ export class ToonRelay implements RelayPort {
     return Number(this.pricePerEvent);
   }
 
+  /**
+   * The channel's live cumulative claim — the real amount this dimension has
+   * paid across every write the channel funded (identity events at plant,
+   * dittos, tick reports alike). This, not a fractal-side tally, is what
+   * budget accounting runs on, so `spent` can never drift below what the
+   * channel has actually committed.
+   */
+  async channelSpend(): Promise<number> {
+    const channelId = await this.resolveChannel();
+    return Number(this.publishClient.getChannelCumulativeAmount(channelId));
+  }
+
   async publish(request: PublishRequest): Promise<PublishResult> {
     const channelId = await this.resolveChannel();
     const before = this.publishClient.getChannelCumulativeAmount(channelId);

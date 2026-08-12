@@ -46,6 +46,19 @@ export interface RelayPort {
    */
   quoteFee(request: PublishRequest): Promise<number>;
   /**
+   * The total this dimension's own channel has actually paid out so far — the
+   * live claim, not a fractal-side tally. It covers **every** write the
+   * channel funds: `plant`'s three identity events, every ditto, and every
+   * tick report. Budget accounting prefers it over any locally reconstructed
+   * running total, so "budget cap is the channel balance" is measured against
+   * the same number the channel enforces (CONTEXT.md — Dimension identity).
+   *
+   * Optional: a relay with no channel underneath it (the in-memory fake, a
+   * plain relay-set fan-out) has no claim to read, so `tick` falls back to
+   * the running total carried in the previous tick report.
+   */
+  channelSpend?(): Promise<number>;
+  /**
    * Funds (or tops up) the dimension's own payment channel to at least
    * `desiredCap` and returns the channel's actual resulting balance — the
    * authoritative budget cap, since "budget cap is the channel balance,
