@@ -62,7 +62,7 @@ function requireEnv(name: string): string {
   return value;
 }
 
-function parsePositiveInt(name: string, raw: string): number {
+function parseNonNegativeInt(name: string, raw: string): number {
   const value = Number.parseInt(raw, 10);
   if (!Number.isInteger(value) || value < 0) {
     throw new Error(
@@ -96,7 +96,7 @@ function readConfig(): ProofConfig {
 
   return {
     mnemonic,
-    index: parsePositiveInt(
+    index: parseNonNegativeInt(
       'FRACTAL_DEVNET_INDEX',
       process.env.FRACTAL_DEVNET_INDEX ?? '0'
     ),
@@ -105,7 +105,7 @@ function readConfig(): ProofConfig {
     relaySet,
     proxyUrl: process.env.FRACTAL_DEVNET_PROXY_URL ?? DEVNET_PROXY_URL,
     faucetUrl: process.env.FRACTAL_DEVNET_FAUCET_URL ?? DEVNET_FAUCET_URL,
-    budgetCap: parsePositiveInt(
+    budgetCap: parseNonNegativeInt(
       'FRACTAL_DEVNET_BUDGET_CAP',
       process.env.FRACTAL_DEVNET_BUDGET_CAP ?? String(DEFAULT_BUDGET_CAP)
     ),
@@ -149,8 +149,8 @@ function printReport(report: DevnetProofReport): void {
   const lines = [
     '## fractal devnet relay proof',
     '',
-    `| | |`,
-    `|---|---|`,
+    '| | |',
+    '|---|---|',
     `| npub | \`${report.npub}\` |`,
     `| pubkey | \`${report.pubkey}\` |`,
     `| index | ${report.index} |`,

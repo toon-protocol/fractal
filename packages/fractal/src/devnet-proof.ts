@@ -13,6 +13,7 @@ import type { BelowPort } from './ports/below.js';
 import type { BrainPort } from './ports/brain.js';
 import type { RelayPort } from './ports/relay.js';
 import { FEED_RESOURCE } from './adapters/feed.js';
+import { fixtureKey } from './fakes/fixture-below.js';
 
 /**
  * The fixed source this proof ditto-loops against. Its endpoint is a
@@ -48,10 +49,13 @@ export const PROOF_FIXTURE_PAYLOAD: readonly Record<string, unknown>[] = [
   },
 ];
 
-/** `FixtureBelow`'s fixture-key convention (`fakes/fixture-below.ts`), duplicated here to avoid a fakes -> proof dependency. */
+/** The payload above, keyed the way `FixtureBelow` looks it up — ready to hand straight to `new FixtureBelow({ fixtures })`. */
 export const PROOF_FIXTURES: Readonly<Record<string, unknown>> = {
-  [`${PROOF_SOURCE.id}:${FEED_RESOURCE}`]: PROOF_FIXTURE_PAYLOAD,
+  [fixtureKey(PROOF_SOURCE.id, FEED_RESOURCE)]: PROOF_FIXTURE_PAYLOAD,
 };
+
+/** The NIP-01 kind the feed medium dittos into — what this proof plants a mapping for and reads back to verify. */
+const DITTO_EVENT_KIND = 1;
 
 /** Builds the spec this proof plants — one source, one NIP mapping, `budgetCap` is a pre-fund request that `plant`'s `fundChannel` overrides with the channel's real deposit. */
 export function buildProofSpec(
@@ -60,7 +64,7 @@ export function buildProofSpec(
 ): DimensionSpec {
   return {
     sources: [PROOF_SOURCE],
-    nipMappings: [{ nip: 'NIP-01', kind: 1 }],
+    nipMappings: [{ nip: 'NIP-01', kind: DITTO_EVENT_KIND }],
     cadence: 'hourly',
     budgetCap,
     relaySet,
@@ -203,7 +207,7 @@ export async function runDevnetProof(
   if (tickResult.published.length > 0) {
     const dittoReadBack = await ports.relay.readBack({
       authors: [identity.pubkey],
-      kinds: [1],
+      kinds: [DITTO_EVENT_KIND],
       limit: 500,
     });
     const seenIds = new Set(dittoReadBack.map((event) => event.id));

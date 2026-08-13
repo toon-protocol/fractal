@@ -29,11 +29,11 @@
 # publish, free read-back, and claim-sourced fee reconciliation, all through
 # the real client.
 #
-# It ditto-loops against a FIXED FIXTURE, not a live API (`FixtureBelow`,
-# `PROOF_FIXTURES` in devnet-proof.ts) — no real Below port exists yet in
-# this repo (that is a different, as-yet-unfiled scope), and this issue is
-# about the Relay port only. The fixture is deterministic, so a fresh index
-# always dittos the exact same two events.
+# It ditto-loops against a FIXED FIXTURE, not a live API (`PROOF_FIXTURES` in
+# devnet-proof.ts, served by `fakes/fixture-below.ts`'s `FixtureBelow`) — no
+# real Below port exists yet in this repo (that is a different, as-yet-unfiled
+# scope), and this issue is about the Relay port only. The fixture is
+# deterministic, so a fresh index always dittos the exact same two events.
 #
 # ── SAFETY ──────────────────────────────────────────────────────────────────
 #   * `apply` defaults to false. A dry run derives the dimension's identity
