@@ -2,9 +2,16 @@ import type { RelaySignedEvent } from '@toon-protocol/fractal/ports';
 
 /**
  * Deterministic fixture events for component tests — no network, no relay.
- * One dimension's full event history: profile, seed, spec, two dittos (one
- * with provenance tags, one without), and one interpretation referencing
- * both (CONTEXT.md — Ditto, Interpretation).
+ * {@link FIXTURE_EVENTS} is one dimension's full event history: profile,
+ * seed, spec, two dittos (one with provenance tags, one without), one
+ * interpretation referencing both, and a tick report (CONTEXT.md — Ditto,
+ * Interpretation). The hostile- and malformed-resource dittos are exported
+ * on their own rather than folded into that history: they are the renderer's
+ * untrusted-input cases, not part of a well-formed dimension.
+ *
+ * Kinds are written as their literal wire numbers on purpose — a fixture
+ * that reused fractal's exported constants could never catch a kind
+ * regression, because it would move with the code under test.
  */
 
 export const FIXTURE_PUBKEY =

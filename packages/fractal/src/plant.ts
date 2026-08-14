@@ -10,6 +10,12 @@ import type { Seed } from './domain/seed.js';
 import type { BrainPort } from './ports/brain.js';
 import type { RelayPort } from './ports/relay.js';
 
+/**
+ * Re-exported, not declared here: these kinds now live in `domain/event.ts`
+ * so the portal can import them from the `./domain` subpath without pulling
+ * in plant's relay/brain wiring. Kept on plant's surface because the modules
+ * that publish and read these events already import them from here.
+ */
 export { PROFILE_EVENT_KIND, SEED_EVENT_KIND, SPEC_EVENT_KIND };
 
 export interface PlantRequest {

@@ -16,6 +16,9 @@ import type { RelaySignedEvent } from '@toon-protocol/fractal/ports';
 const SOURCE_TAG = 'source';
 const RESOURCE_TAG = 'resource';
 
+/** NIP-01's event-reference tag — how an interpretation names the dittos it comments on. */
+const EVENT_REF_TAG = 'e';
+
 /** Events that are part of a dimension's identity/operations, never rendered in the feed. */
 const NON_FEED_KINDS = new Set([
   PROFILE_EVENT_KIND,
@@ -105,7 +108,7 @@ function toFeedItem(event: RelaySignedEvent): FeedItem {
       content: event.content,
       createdAt: event.createdAt,
       referencedDittoIds: event.tags
-        .filter((tag) => tag[0] === 'e')
+        .filter((tag) => tag[0] === EVENT_REF_TAG)
         .map((tag) => tag[1])
         .filter((id): id is string => id !== undefined),
     };

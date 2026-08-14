@@ -1,5 +1,6 @@
 import { SimplePool } from 'nostr-tools/pool';
 import { DEFAULT_RELAY_SET } from '@toon-protocol/fractal/domain';
+import type { Event as NostrToolsEvent } from 'nostr-tools/core';
 import type { RelaySignedEvent } from '@toon-protocol/fractal/ports';
 
 /**
@@ -15,15 +16,8 @@ export interface DimensionReader {
   ): Promise<readonly RelaySignedEvent[]>;
 }
 
-function toRelaySignedEvent(event: {
-  id: string;
-  pubkey: string;
-  kind: number;
-  content: string;
-  tags: string[][];
-  created_at: number;
-  sig: string;
-}): RelaySignedEvent {
+/** Wire shape (`created_at`) in, port shape (`createdAt`) out. */
+function toRelaySignedEvent(event: NostrToolsEvent): RelaySignedEvent {
   return {
     id: event.id,
     pubkey: event.pubkey,

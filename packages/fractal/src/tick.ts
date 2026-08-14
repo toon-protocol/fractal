@@ -18,6 +18,7 @@ import type {
   RelaySignedEvent,
 } from './ports/relay.js';
 
+/** Re-exported, not declared here — the kind now lives in `domain/event.ts`; see plant.ts for why. */
 export { TICK_REPORT_EVENT_KIND };
 
 const ADAPTERS = new AdapterRegistry();
