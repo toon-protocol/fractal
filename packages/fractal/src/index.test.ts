@@ -58,6 +58,9 @@ import type {
   DevnetProofRequest,
   DevnetProofPorts,
   DevnetProofReport,
+  BrainPlantProofRequest,
+  BrainPlantProofPorts,
+  BrainPlantProofReport,
 } from './index.js';
 
 // The `import type { ... }` above is itself the guard: if a type is renamed
@@ -111,6 +114,8 @@ const EXPECTED_VALUE_EXPORTS = [
   'PROOF_FIXTURES',
   'PROOF_SOURCE',
   'runDevnetProof',
+  'assertBrainPlantProofSucceeded',
+  'runBrainPlantProof',
 ].sort();
 
 describe('package root barrel', () => {

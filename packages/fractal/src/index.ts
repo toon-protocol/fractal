@@ -10,6 +10,7 @@ export * from './amend.js';
 export * from './relay-pool.js';
 export * from './toon-relay.js';
 export * from './devnet-proof.js';
+export * from './brain-plant-proof.js';
 export * from './headless-claude.js';
 export * from './claude-brain.js';
 export * from './ports/index.js';
