@@ -1,0 +1,148 @@
+# Brain plant proof — a real one-utterance plant through headless Claude,
+# run as a workflow rather than as an agent (fractal#9).
+#
+# ── WHY A WORKFLOW AND NOT AN AGENT ─────────────────────────────────────────
+# fractal#33 built and unit-tested the real Brain port (`ClaudeBrain`)
+# against a `ScriptedBrain` fake — CI stayed model-free by design. What was
+# missing was proof the compile skill works against a LIVE model: a real
+# `fractal plant "<seed>"` producing a validated spec via headless Claude,
+# with the bounded-retry path sanity-checked against real model output
+# rather than only scripted fakes. That needs a credential that can spend
+# real model tokens (`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`).
+# `.sandcastle/sandbox-secrets.ts` forwards `CLAUDE_CODE_OAUTH_TOKEN` into
+# the agent sandbox only to authenticate the `claude-code` CLI driving the
+# agent itself — it is never a plain env var reachable by fractal's own
+# code there. The secret reaches a GitHub-hosted runner executing THIS
+# file — reviewed, committed, deterministic — and never a container running
+# agent-authored code. Same shape as `devnet-relay-proof.yml` (fractal#8),
+# which this file follows structurally.
+#
+# An agent DISPATCHES this (its App token carries `actions: write`) and reads
+# the run's summary/artifacts back. It never holds the credential.
+#
+# ── WHAT THIS PROVES, AND WHAT IT DELIBERATELY DOES NOT ─────────────────────
+# `packages/fractal/src/brain-plant-proof.ts` (model-free, unit-tested
+# against a `ScriptedBrain`) drives: derive the dimension identity -> plant
+# it through the given Brain port -> re-validate the compiled spec
+# independently of `plant`'s own internal check -> read every planted event
+# (profile/seed/spec) back through the SAME port rather than trusting
+# `plant`'s return value, catching a half-plant fractal#33 was built to make
+# impossible. That is fractal#9's first acceptance criterion.
+#
+# The Relay port here is a plain in-memory fake, not a real network: the
+# Relay port's realness was already proven live by fractal#8/#32, and this
+# proof is scoped to the Brain port only — an in-memory relay is exactly as
+# probative for that scope as a real one, and it means this workflow needs
+# no funded devnet channel and no `E2E_DEV_MNEMONIC`.
+#
+# The workflow's own comparison step (fractal#9's second acceptance
+# criterion — "compare real-model failure behaviour against fractal#33's
+# scripted assumptions") is manual: read the uploaded transcript artifact
+# after a real `apply: true` run and compare each compile attempt's prompt
+# and raw result against `claude-brain.test.ts`'s scripted cases (an invalid
+# spec is kicked back with `spec:<reason>`, unparseable JSON with
+# `json:unparseable-response`, a query failure with `query:<error>`, giving
+# up after exactly `MAX_SPEC_ATTEMPTS` attempts). File any divergence you
+# observe as a follow-up issue and record it in
+# `docs/brain-plant-proof.md`'s run table.
+#
+# ── SAFETY ──────────────────────────────────────────────────────────────────
+#   * `apply` defaults to false. A dry run reports only whether credentials
+#     are present and what an apply run would do. It never calls the model.
+#   * A fresh index is required every run: `runBrainPlantProof` refuses to
+#     re-plant an index the (per-run, in-memory) relay already shows as
+#     planted, matching `plant`'s own real refusal — this run cannot
+#     accidentally double-spend model tokens on the same identity, since
+#     each dispatch starts a fresh in-memory relay regardless of the index
+#     given.
+#   * No chain, wallet, or payment channel of any kind is touched — the
+#     `account_index`/`mnemonic` inputs exist only so
+#     `deriveDimensionIdentity` has something to derive from; the default
+#     mnemonic is a well-known public BIP-39 test phrase, not a secret.
+#
+# ── REQUIRED SECRET ─────────────────────────────────────────────────────────
+#   One of ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (the same credential
+#   `agent-implement.yml` already uses to drive `claude-code`).
+
+name: brain-plant-proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Call the real model. false = dry run, reports credential presence only.'
+        type: boolean
+        required: false
+        default: false
+      utterance:
+        description: 'The one-utterance seed to compile via headless Claude.'
+        type: string
+        required: false
+        default: 'build me a dimension of the indie game dev scene'
+      account_index:
+        description: "NIP-06 dimension index to derive identity at (m/44'/1237'/i'/0/0). No chain is touched; pick any value."
+        type: string
+        required: false
+        default: '0'
+      model:
+        description: 'Optional model override for the headless Claude call. Defaults to the SDK default.'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-plant-proof
+  cancel-in-progress: false
+
+jobs:
+  brain-plant-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build fractal
+        run: pnpm --filter @toon-protocol/fractal build
+
+      - name: Run brain plant proof
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          FRACTAL_BRAIN_PROOF_APPLY: ${{ inputs.apply }}
+          FRACTAL_BRAIN_PROOF_UTTERANCE: ${{ inputs.utterance }}
+          FRACTAL_BRAIN_PROOF_INDEX: ${{ inputs.account_index }}
+          FRACTAL_BRAIN_PROOF_MODEL: ${{ inputs.model }}
+          FRACTAL_BRAIN_PROOF_REPORT_PATH: ${{ runner.temp }}/brain-plant-proof-report.json
+          FRACTAL_BRAIN_PROOF_TRANSCRIPT_PATH: ${{ runner.temp }}/brain-plant-proof-transcript.json
+        run: node packages/fractal/dist/bin/brain-plant-proof.js
+
+      - name: Upload proof report and transcript
+        # Only an apply run writes these files. `apply` is a `type: boolean`
+        # input, so `inputs.apply` is a real boolean here and is used as the
+        # condition directly — comparing it to the STRING 'true' would
+        # always be false (GitHub coerces mismatched types to numbers, and
+        # 'true' becomes NaN), silently skipping this upload on every run.
+        if: ${{ inputs.apply }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: brain-plant-proof-${{ inputs.account_index }}
+          path: |
+            ${{ runner.temp }}/brain-plant-proof-report.json
+            ${{ runner.temp }}/brain-plant-proof-transcript.json
+          if-no-files-found: error
+          retention-days: 90

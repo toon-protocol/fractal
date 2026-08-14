@@ -47,7 +47,9 @@ Requires Node `>=22` and pnpm `8.15.9` (see `packageManager`).
 
 The real Relay port is proven against the live TOON devnet by a dispatchable
 workflow, not a local command — see
-[`docs/devnet-relay-proof.md`](docs/devnet-relay-proof.md).
+[`docs/devnet-relay-proof.md`](docs/devnet-relay-proof.md). The real Brain
+port is proven against a live model the same way — see
+[`docs/brain-plant-proof.md`](docs/brain-plant-proof.md).
 
 ## Factory
 
