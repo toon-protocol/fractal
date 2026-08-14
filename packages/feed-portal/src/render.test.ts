@@ -3,6 +3,8 @@ import { buildDimensionView } from './feed-model.js';
 import { renderDimensionView } from './render.js';
 import {
   FIXTURE_DITTO_EVENT,
+  FIXTURE_DITTO_EVENT_HOSTILE_RESOURCE,
+  FIXTURE_DITTO_EVENT_MALFORMED_RESOURCE,
   FIXTURE_DITTO_EVENT_NO_PROVENANCE,
   FIXTURE_EVENTS,
   FIXTURE_INTERPRETATION_EVENT,
@@ -78,6 +80,30 @@ describe('renderDimensionView', () => {
     expect(details?.querySelector('a')?.getAttribute('href')).toBe(
       'https://hn.example/top#0'
     );
+  });
+
+  it('renders a javascript: resource URL as plain text, never as a link', () => {
+    const container = document.createElement('div');
+    const view = buildDimensionView(FIXTURE_PUBKEY, [
+      FIXTURE_DITTO_EVENT_HOSTILE_RESOURCE,
+    ]);
+    renderDimensionView(container, view);
+
+    const details = container.querySelector<HTMLElement>('.provenance-details');
+    expect(details?.querySelector('a')).toBeNull();
+    expect(details?.textContent).toContain('javascript:alert(1)');
+  });
+
+  it('renders an unparseable resource URL as plain text, never as a link', () => {
+    const container = document.createElement('div');
+    const view = buildDimensionView(FIXTURE_PUBKEY, [
+      FIXTURE_DITTO_EVENT_MALFORMED_RESOURCE,
+    ]);
+    renderDimensionView(container, view);
+
+    const details = container.querySelector<HTMLElement>('.provenance-details');
+    expect(details?.querySelector('a')).toBeNull();
+    expect(details?.textContent).toContain('not a url');
   });
 
   it('renders no provenance toggle for a ditto with no provenance tags', () => {

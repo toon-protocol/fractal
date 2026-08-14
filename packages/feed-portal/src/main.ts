@@ -2,6 +2,7 @@ import { decode } from 'nostr-tools/nip19';
 import { buildDimensionView } from './feed-model.js';
 import { renderDimensionView } from './render.js';
 import { NostrPoolReader } from './dimension-reader.js';
+import { resolveRelaySetFromSearch } from './relay-config.js';
 
 function readNpubFromLocation(): string | undefined {
   return new URLSearchParams(window.location.search).get('npub') ?? undefined;
@@ -34,9 +35,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  const events = await new NostrPoolReader().readEvents(pubkey);
+  const relaySet = resolveRelaySetFromSearch(window.location.search);
+  const events = await new NostrPoolReader().readEvents(pubkey, relaySet);
   if (events.length === 0) {
-    root.textContent = `No dimension found for ${npub}`;
+    root.textContent = `No dimension found for ${npub} on ${relaySet.join(', ')} — pass ?relays=<url,…> to query a different relay set.`;
     return;
   }
 

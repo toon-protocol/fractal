@@ -69,6 +69,28 @@ export const FIXTURE_DITTO_EVENT = buildEvent({
   createdAt: 1_700_000_100,
 });
 
+/** A ditto whose `resource` tag is a hostile `javascript:` URL — permissionless-relay data must never become a clickable script sink. */
+export const FIXTURE_DITTO_EVENT_HOSTILE_RESOURCE = buildEvent({
+  kind: 1,
+  content: 'A ditto published by an attacker',
+  tags: [
+    ['source', 'hn'],
+    ['resource', 'javascript:alert(1)'],
+  ],
+  createdAt: 1_700_000_120,
+});
+
+/** A ditto whose `resource` tag is not a parseable absolute URL at all. */
+export const FIXTURE_DITTO_EVENT_MALFORMED_RESOURCE = buildEvent({
+  kind: 1,
+  content: 'A ditto with a malformed resource tag',
+  tags: [
+    ['source', 'hn'],
+    ['resource', 'not a url'],
+  ],
+  createdAt: 1_700_000_110,
+});
+
 /** A ditto missing its provenance tags — malformed relay data at the read boundary. */
 export const FIXTURE_DITTO_EVENT_NO_PROVENANCE = buildEvent({
   kind: 1,

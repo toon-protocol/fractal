@@ -51,6 +51,38 @@ function renderHeader(view: DimensionView): HTMLElement {
 }
 
 /**
+ * A ditto's `resource` tag is untrusted relay data — any pubkey can publish
+ * an event whose resource is a `javascript:` URL, and the agent internet is
+ * permissionless, so hostile content is this renderer's expected input
+ * (CONTEXT.md — Agent internet). Only http(s) resources become clickable;
+ * everything else renders as plain text.
+ */
+function isLinkableResourceUrl(resourceUrl: string): boolean {
+  try {
+    const { protocol } = new URL(resourceUrl);
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function renderResource(resourceUrl: string): HTMLElement {
+  if (!isLinkableResourceUrl(resourceUrl)) {
+    const text = document.createElement('span');
+    text.className = 'provenance-resource';
+    text.textContent = resourceUrl;
+    return text;
+  }
+  const link = document.createElement('a');
+  link.className = 'provenance-resource';
+  link.href = resourceUrl;
+  link.textContent = resourceUrl;
+  link.rel = 'noopener noreferrer';
+  link.target = '_blank';
+  return link;
+}
+
+/**
  * Provenance is disclosed on demand, not printed inline — the feed reads as
  * a feed by default, and any ditto still reveals its below-source with one
  * click (CONTEXT.md — Ditto, "provenance on demand").
@@ -77,14 +109,7 @@ function renderProvenanceDisclosure(item: DittoItem): HTMLElement | undefined {
   source.className = 'provenance-source';
   source.textContent = `Source: ${sourceId}`;
 
-  const link = document.createElement('a');
-  link.className = 'provenance-resource';
-  link.href = resourceUrl;
-  link.textContent = resourceUrl;
-  link.rel = 'noopener noreferrer';
-  link.target = '_blank';
-
-  details.append(source, link);
+  details.append(source, renderResource(resourceUrl));
 
   toggle.addEventListener('click', () => {
     details.hidden = !details.hidden;

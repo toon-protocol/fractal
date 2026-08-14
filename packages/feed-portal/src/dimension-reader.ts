@@ -39,9 +39,11 @@ function toRelaySignedEvent(event: {
  * Reads a dimension's events back over free NIP-01 nostr reads (CONTEXT.md —
  * Agent internet, "Browsing it is free (reads)"). A dimension's own relay set
  * lives inside its spec, which itself must first be read from somewhere — so
- * this defaults to the shared relay set every dimension falls back to when
- * its spec compiles none of its own (a two-phase read — spec first, then the
- * spec's own relay set — is a later portal iteration's concern).
+ * the caller passes the relay set to bootstrap from (`main.ts` resolves it
+ * from the page URL via `relay-config.ts`), defaulting to the shared relay
+ * set every dimension falls back to when its spec compiles none of its own
+ * (a two-phase read — spec first, then the spec's own relay set — is a later
+ * portal iteration's concern).
  */
 export class NostrPoolReader implements DimensionReader {
   private readonly pool = new SimplePool();
