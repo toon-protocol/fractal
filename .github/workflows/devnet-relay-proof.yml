@@ -1,0 +1,178 @@
+# Devnet relay proof — plant + tick a real fractal dimension over a funded
+# TOON payment channel, run as a workflow rather than as an agent (fractal#8).
+#
+# ── WHY A WORKFLOW AND NOT AN AGENT ─────────────────────────────────────────
+# fractal#32 built and unit-tested the real Relay port (`ToonRelay`) against
+# mocks of the published `@toon-protocol/client` stack — CI stayed
+# network-free by design. What was missing was proof the port works against
+# the LIVE devnet: a funded channel, a real paid publish, a real read-back.
+# That needs a mnemonic that can sign and pay, and `.sandcastle/sandbox-
+# secrets.ts` forwards exactly two values into the agent sandbox
+# (CLAUDE_CODE_OAUTH_TOKEN, GH_TOKEN) — `E2E_DEV_MNEMONIC` is deliberately
+# absent, because it is ONE BIP-39 phrase deriving keys on every chain and
+# this repository is public. The secret reaches a GitHub-hosted runner
+# executing THIS file — reviewed, committed, deterministic — and never a
+# container running agent-authored code. Same shape as connector's
+# `funded-ops.yml`/`fleet-ops.yml`, which this file follows structurally.
+#
+# An agent DISPATCHES this (its App token carries `actions: write`) and reads
+# the run's summary/artifact back. It never holds the mnemonic.
+#
+# ── WHAT THIS PROVES, AND WHAT IT DELIBERATELY DOES NOT ─────────────────────
+# `packages/fractal/src/devnet-proof.ts` (network-free, unit-tested against
+# fakes) drives: derive the dimension identity -> plant it if not already
+# living (spec supplied explicitly, so the Brain port is never touched) ->
+# fund its channel -> tick once (publishing real dittos) -> read every
+# published event back through the SAME port rather than trusting a return
+# value -> reconcile the channel's live claim against the tick's
+# self-reported fees. That is fractal#8's full acceptance criteria: paid
+# publish, free read-back, and claim-sourced fee reconciliation, all through
+# the real client.
+#
+# It ditto-loops against a FIXED FIXTURE, not a live API (`PROOF_FIXTURES` in
+# devnet-proof.ts, served by `fakes/fixture-below.ts`'s `FixtureBelow`) — no
+# real Below port exists yet in this repo (that is a different, as-yet-unfiled
+# scope), and this issue is about the Relay port only. The fixture is a
+# deterministic two-item base plus ONE run-stamped item at a fresh cursor
+# position (`buildProofFixtures`), so EVERY dispatch — fresh index or reuse —
+# publishes at least one real paid ditto; the job fails if it didn't.
+#
+# ── SAFETY ──────────────────────────────────────────────────────────────────
+#   * `apply` defaults to false. A dry run derives the dimension's identity
+#     locally (no network spend possible from that alone) and does a FREE
+#     nostr read to report whether the index is already planted. It never
+#     constructs a `ToonClient` and never sends anything.
+#   * `initialDeposit` is pinned to "0" in the real client config
+#     (bin/devnet-relay-proof.ts) — the channel this run funds is opened
+#     lazily and topped up EXPLICITLY to `budget_cap_base_units` by
+#     `ToonRelay.fundChannel`, an absolute target (top up to at least this),
+#     never an increment — the top-up runs on EVERY apply run, plant or
+#     reuse, so it is a safe no-op once the channel already holds that much
+#     (same "absolute total, not an increment" discipline as
+#     funded-ops.yml's `deposit`).
+#   * An already-planted index is REUSED, not re-planted — plant.ts itself
+#     refuses to double-plant an index, and this script checks first so a
+#     re-run against the same index only tops up + ticks (mirrors "prefer
+#     reusing an open channel over opening a new one").
+#   * Every write is re-read back through the port before the job is allowed
+#     to pass: published dittos are independently visible on `readBack`, and
+#     the channel's real claim (`channelSpend`) is what fee reconciliation
+#     checks against — not the client call's own return value. The job FAILS
+#     (`assertProofSucceeded`) if any of that does not hold.
+#   * The mnemonic is masked (`::add-mask::`) the instant it's read, before
+#     any other line executes.
+#   * `price_per_event_base_units` is a placeholder default
+#     (bin/devnet-relay-proof.ts's `DEFAULT_PRICE_PER_EVENT`) — verify it
+#     against the devnet apex's actual pricing before relying on the fee
+#     numbers this run reports. For scale: the client prices a write it is
+#     given no explicit amount for at 10 base units per TOON-encoded byte, so
+#     `1000` buys roughly 100 bytes and a real ditto is larger; an
+#     under-priced write is refused rather than silently accepted. The
+#     reconciliation check is still meaningful even if the price is off, since
+#     it compares the channel's real claim against the tick's OWN reported
+#     fee, not against this constant.
+#
+# ── REQUIRED SECRET ─────────────────────────────────────────────────────────
+#   E2E_DEV_MNEMONIC   The shared devnet-scoped BIP-39 phrase (same secret
+#                      connector's funded-ops.yml/fleet-ops.yml use). NOT
+#                      testnet-scoped on its own — treat it exactly as those
+#                      files' headers describe.
+
+name: devnet-relay-proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Perform the write. false = dry run, reads and prints only.'
+        type: boolean
+        required: false
+        default: false
+      account_index:
+        description: "NIP-06 dimension index to plant/reuse (nostr-tools' account index, m/44'/1237'/i'/0/0). Pick a fresh one to plant a new dimension, or an existing one to reuse its channel."
+        type: string
+        required: false
+        default: '0'
+      utterance:
+        description: 'Seed utterance, only used if this index is not already planted.'
+        type: string
+        required: false
+        default: 'fractal devnet relay proof — plant + tick over a real funded channel'
+      relay_set:
+        description: 'Comma-separated nostr relay URLs to plant/read/tick against. Defaults to the public devnet relay.'
+        type: string
+        required: false
+        default: ''
+      budget_cap_base_units:
+        description: "Absolute channel deposit TARGET (base units, 6dp USDC). fundChannel tops up to at least this — never an increment, so re-running is a safe no-op once it's already there. Raising it past the cap this index was PLANTED with funds the channel but does not raise the tick's own cap, which lives in the planted spec."
+        type: string
+        required: false
+        default: '100000'
+      price_per_event_base_units:
+        description: 'ILP amount offered per published event (base units). Verify against devnet pricing — see this file header.'
+        type: string
+        required: false
+        default: '1000'
+      fund_from_faucet:
+        description: 'Best-effort drip devnet USDC to this identity before funding the channel (apply only).'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  # One proof run per dimension index at a time — two concurrent runs against
+  # the same index could race the channel's nonce.
+  group: devnet-relay-proof-${{ inputs.account_index }}
+  cancel-in-progress: false
+
+jobs:
+  devnet-relay-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build fractal
+        run: pnpm --filter @toon-protocol/fractal build
+
+      - name: Run devnet relay proof
+        env:
+          E2E_DEV_MNEMONIC: ${{ secrets.E2E_DEV_MNEMONIC }}
+          FRACTAL_DEVNET_APPLY: ${{ inputs.apply }}
+          FRACTAL_DEVNET_INDEX: ${{ inputs.account_index }}
+          FRACTAL_DEVNET_UTTERANCE: ${{ inputs.utterance }}
+          FRACTAL_DEVNET_RELAY_SET: ${{ inputs.relay_set }}
+          FRACTAL_DEVNET_BUDGET_CAP: ${{ inputs.budget_cap_base_units }}
+          FRACTAL_DEVNET_PRICE_PER_EVENT: ${{ inputs.price_per_event_base_units }}
+          FRACTAL_DEVNET_FUND_FROM_FAUCET: ${{ inputs.fund_from_faucet }}
+          FRACTAL_DEVNET_REPORT_PATH: ${{ runner.temp }}/devnet-relay-proof-report.json
+        run: node packages/fractal/dist/bin/devnet-relay-proof.js
+
+      - name: Upload proof report
+        # Only an apply run writes a report. `apply` is a `type: boolean`
+        # input, so `inputs.apply` is a real boolean here and is used as the
+        # condition directly — comparing it to the STRING 'true' would always
+        # be false (GitHub coerces mismatched types to numbers, and 'true'
+        # becomes NaN), silently skipping this upload on every run.
+        if: ${{ inputs.apply }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: devnet-relay-proof-report-${{ inputs.account_index }}
+          path: ${{ runner.temp }}/devnet-relay-proof-report.json
+          if-no-files-found: error
+          retention-days: 90

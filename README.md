@@ -45,6 +45,10 @@ pnpm typecheck        # tsc -b
 
 Requires Node `>=22` and pnpm `8.15.9` (see `packageManager`).
 
+The real Relay port is proven against the live TOON devnet by a dispatchable
+workflow, not a local command — see
+[`docs/devnet-relay-proof.md`](docs/devnet-relay-proof.md).
+
 ## Factory
 
 This repo is built by the org's sandcastle software factory (see toon-meta

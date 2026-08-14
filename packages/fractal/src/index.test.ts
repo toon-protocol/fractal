@@ -55,6 +55,9 @@ import type {
   HeadlessQueryResult,
   HeadlessQuery,
   ClaudeBrainOptions,
+  DevnetProofRequest,
+  DevnetProofPorts,
+  DevnetProofReport,
 } from './index.js';
 
 // The `import type { ... }` above is itself the guard: if a type is renamed
@@ -99,6 +102,15 @@ const EXPECTED_VALUE_EXPORTS = [
   'status',
   'tick',
   'validateSpec',
+  'assertProofSucceeded',
+  'buildProofFixturePayload',
+  'buildProofFixtures',
+  'buildProofSpec',
+  'NEVER_BRAIN',
+  'PROOF_FIXTURE_PAYLOAD',
+  'PROOF_FIXTURES',
+  'PROOF_SOURCE',
+  'runDevnetProof',
 ].sort();
 
 describe('package root barrel', () => {

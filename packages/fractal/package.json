@@ -21,11 +21,13 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b",
-    "clean": "tsc -b --clean"
+    "clean": "tsc -b --clean",
+    "devnet-relay-proof": "node ./dist/bin/devnet-relay-proof.js"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.228",
     "@toon-protocol/client": "^0.21.3",
+    "@toon-protocol/relay": "^2.0.2",
     "nostr-tools": "^2.24.1"
   }
 }
