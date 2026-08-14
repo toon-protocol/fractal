@@ -218,10 +218,10 @@ export interface DevnetProofReport {
  * existing one otherwise — "prefer reusing an open channel over opening a
  * new one" — and topping its channel up to the requested budget target,
  * which `plant` would otherwise have done), tick it once, then verify by
- * reading the *same port* back
- * rather than trusting either call's return value, and reconcile the
- * channel's live claim against the tick's self-reported fees (CONTEXT.md —
- * Ditto loop, Dimension identity; fractal#8/#32).
+ * reading the *same port* back rather than trusting either call's return
+ * value, and reconcile the channel's live claim against the tick's
+ * self-reported fees (CONTEXT.md — Ditto loop, Dimension identity;
+ * fractal#8/#32).
  */
 export async function runDevnetProof(
   request: DevnetProofRequest,
@@ -278,11 +278,13 @@ export async function runDevnetProof(
     plantedEventsVerified =
       profileBack.length > 0 && seedBack.length > 0 && specBack.length > 0;
   } else if (ports.relay.fundChannel) {
-    // `fundChannel` otherwise runs only inside `plant`, and plant only runs
-    // on a fresh index — so the reuse path must top the channel up here, or
-    // re-dispatching with a raised `budget_cap_base_units` would silently do
-    // nothing. The target is absolute ("top up to at least"), so this is a
-    // no-op whenever the channel already holds that much.
+    // `fundChannel` otherwise runs only inside `plant`, and plant only runs on
+    // a fresh index — so the reuse path tops the channel up here, keeping the
+    // deposit (the balance `publish` refuses to spend past) at the requested
+    // target across re-dispatches. The target is absolute ("top up to at
+    // least"), so this is a no-op whenever the channel already holds that
+    // much. It does NOT raise the cap `tick` enforces: that one lives in the
+    // planted spec, and raising it is an `amend`, not a re-dispatch.
     await ports.relay.fundChannel(request.budgetCap);
   }
 

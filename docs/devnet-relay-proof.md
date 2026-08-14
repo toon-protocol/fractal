@@ -54,11 +54,11 @@ From the Actions tab (or `gh workflow run devnet-relay-proof.yml -f apply=true .
 | Input | Meaning |
 | --- | --- |
 | `apply` | **Defaults to `false`.** A dry run only checks (via a free nostr read) whether `account_index` is already planted, and prints what an apply run would do. Nothing is sent. |
-| `account_index` | The NIP-06 dimension index to plant or reuse. Pick a fresh one to plant a new dimension; reuse an existing one to avoid opening a new channel — a reuse run still tops the channel up to `budget_cap_base_units` and still publishes (and verifies) one fresh paid ditto. |
+| `account_index` | The NIP-06 account index the dimension's key is derived at (`m/44'/1237'/i'/0/0`). Pick a fresh one to plant a new dimension; reuse an existing one to avoid opening a new channel — a reuse run still tops the channel up to `budget_cap_base_units` and still publishes (and verifies) one fresh paid ditto. |
 | `utterance` | The seed, only used if the index isn't already planted. |
 | `relay_set` | Comma-separated relay URLs. Defaults to the public devnet relay. |
-| `budget_cap_base_units` | Absolute channel deposit **target** (6dp USDC base units). `fundChannel` tops up to at least this — never an increment — so re-dispatching against the same index is a safe no-op once the channel already holds that much. |
-| `price_per_event_base_units` | ILP amount offered per published event. The default is a placeholder — verify it against the devnet apex's actual pricing; the reconciliation check stays meaningful regardless, since it compares the channel's own real claim against the tick's own reported fee, not against this constant. |
+| `budget_cap_base_units` | Absolute channel deposit **target** (6dp USDC base units). `fundChannel` tops up to at least this — never an increment — so re-dispatching against the same index is a safe no-op once the channel already holds that much. It sets the *channel's* deposit, not the cap `tick` enforces: that one was written into the spec this index was planted with, so raising it for an already-planted index is an `amend`, not a re-dispatch. |
+| `price_per_event_base_units` | ILP amount offered per published event. The default is a placeholder — verify it against the devnet apex's actual pricing before the first dispatch. For scale: `ToonClient.publishEvent` prices a write it is not given an explicit amount for at 10 base units per TOON-encoded byte, so the `1000` default covers roughly 100 bytes and a real ditto is larger. An under-priced write is refused, not silently accepted, and the reconciliation check stays meaningful regardless, since it compares the channel's own real claim against the tick's own reported fee, not against this constant. |
 | `fund_from_faucet` | Best-effort drip of devnet USDC to the dimension's EVM address before funding the channel (`apply` only; failures are logged, not fatal — the account may already hold funds). |
 
 An `apply: true` run that succeeds:

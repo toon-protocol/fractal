@@ -64,9 +64,13 @@
 #   * `price_per_event_base_units` is a placeholder default
 #     (bin/devnet-relay-proof.ts's `DEFAULT_PRICE_PER_EVENT`) — verify it
 #     against the devnet apex's actual pricing before relying on the fee
-#     numbers this run reports; the reconciliation check is still meaningful
-#     even if the price is off, since it compares the channel's real claim
-#     against the tick's OWN reported fee, not against this constant.
+#     numbers this run reports. For scale: the client prices a write it is
+#     given no explicit amount for at 10 base units per TOON-encoded byte, so
+#     `1000` buys roughly 100 bytes and a real ditto is larger; an
+#     under-priced write is refused rather than silently accepted. The
+#     reconciliation check is still meaningful even if the price is off, since
+#     it compares the channel's real claim against the tick's OWN reported
+#     fee, not against this constant.
 #
 # ── REQUIRED SECRET ─────────────────────────────────────────────────────────
 #   E2E_DEV_MNEMONIC   The shared devnet-scoped BIP-39 phrase (same secret
@@ -85,7 +89,7 @@ on:
         required: false
         default: false
       account_index:
-        description: "NIP-06 dimension index to plant/reuse (m/44'/1237'/0'/0/i). Pick a fresh one to plant a new dimension, or an existing one to reuse its channel."
+        description: "NIP-06 dimension index to plant/reuse (nostr-tools' account index, m/44'/1237'/i'/0/0). Pick a fresh one to plant a new dimension, or an existing one to reuse its channel."
         type: string
         required: false
         default: '0'
@@ -100,7 +104,7 @@ on:
         required: false
         default: ''
       budget_cap_base_units:
-        description: "Absolute channel deposit TARGET (base units, 6dp USDC). fundChannel tops up to at least this — never an increment, so re-running is a safe no-op once it's already there."
+        description: "Absolute channel deposit TARGET (base units, 6dp USDC). fundChannel tops up to at least this — never an increment, so re-running is a safe no-op once it's already there. Raising it past the cap this index was PLANTED with funds the channel but does not raise the tick's own cap, which lives in the planted spec."
         type: string
         required: false
         default: '100000'
@@ -160,10 +164,11 @@ jobs:
         run: node packages/fractal/dist/bin/devnet-relay-proof.js
 
       - name: Upload proof report
-        # `apply` is a `type: boolean` input, so `inputs.apply` is a real
-        # boolean here — comparing it to the STRING 'true' is always false
-        # (GitHub coerces mismatched types to numbers; 'true' becomes NaN),
-        # which silently skipped this upload on every run.
+        # Only an apply run writes a report. `apply` is a `type: boolean`
+        # input, so `inputs.apply` is a real boolean here and is used as the
+        # condition directly — comparing it to the STRING 'true' would always
+        # be false (GitHub coerces mismatched types to numbers, and 'true'
+        # becomes NaN), silently skipping this upload on every run.
         if: ${{ inputs.apply }}
         uses: actions/upload-artifact@v4
         with:

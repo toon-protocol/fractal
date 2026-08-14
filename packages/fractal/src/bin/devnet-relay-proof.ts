@@ -89,7 +89,12 @@ function parsePositiveBigInt(name: string, raw: string): bigint {
 
 function readConfig(): ProofConfig {
   const mnemonic = requireEnv('E2E_DEV_MNEMONIC');
-  console.log('::add-mask::' + mnemonic);
+  // `::add-mask::` is a GitHub Actions workflow command — the runner consumes
+  // the line and masks the value from every later log line. Anywhere else it
+  // is just a print of the phrase itself, so it is emitted only on a runner.
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    console.log('::add-mask::' + mnemonic);
+  }
 
   const relaySetRaw = process.env.FRACTAL_DEVNET_RELAY_SET;
   const relaySet = relaySetRaw
@@ -229,12 +234,11 @@ async function main(): Promise<void> {
     },
     toonEncoder: encodeEventToToon,
     toonDecoder: decodeEventFromToon,
-    // Zero: this run's channel is opened lazily and topped up EXPLICITLY by
-    // `ToonRelay.fundChannel` below, to an audited target
-    // (FRACTAL_DEVNET_BUDGET_CAP). Leaving the client's own
-    // bootstrap-negotiated default deposit in place would let an unreviewed
-    // peer negotiation decide how much moves on the first publish instead of
-    // this script's own accounted-for target.
+    // Pinned rather than left to the client's own default (also '0'): the
+    // channel this run opens is funded EXCLUSIVELY by `ToonRelay.fundChannel`
+    // below, to one audited target (FRACTAL_DEVNET_BUDGET_CAP), so every base
+    // unit that moves is accounted for by this script rather than by a
+    // channel-open default that a client upgrade could change underneath it.
     initialDeposit: '0',
   });
 
