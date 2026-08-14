@@ -4,6 +4,9 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    environmentMatchGlobs: [
+      ['packages/feed-portal/src/**/*.test.ts', 'jsdom'],
+    ],
     include: ['packages/*/src/**/*.test.ts', '.sandcastle/**/*.test.ts'],
     exclude: ['**/node_modules/**', '**/dist/**'],
     coverage: {
