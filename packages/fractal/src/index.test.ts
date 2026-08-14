@@ -103,6 +103,8 @@ const EXPECTED_VALUE_EXPORTS = [
   'tick',
   'validateSpec',
   'assertProofSucceeded',
+  'buildProofFixturePayload',
+  'buildProofFixtures',
   'buildProofSpec',
   'NEVER_BRAIN',
   'PROOF_FIXTURE_PAYLOAD',

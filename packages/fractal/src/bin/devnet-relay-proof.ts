@@ -6,10 +6,12 @@ import { ToonClient, fundWallet } from '@toon-protocol/client';
 import { encodeEventToToon, decodeEventFromToon } from '@toon-protocol/relay';
 import {
   assertProofSucceeded,
-  PROOF_FIXTURES,
+  buildProofFixtures,
+  PROOF_SOURCE,
   runDevnetProof,
 } from '../devnet-proof.js';
 import type { DevnetProofReport } from '../devnet-proof.js';
+import { dittoedResourceUrls } from '../relay-reads.js';
 import { deriveDimensionIdentity } from '../identity.js';
 import { FixtureBelow } from '../fakes/fixture-below.js';
 import { ToonRelay } from '../toon-relay.js';
@@ -261,7 +263,22 @@ async function main(): Promise<void> {
       relayUrls: config.relaySet,
       pricePerEvent: config.pricePerEvent,
     });
-    const below = new FixtureBelow({ fixtures: PROOF_FIXTURES });
+    // The same cursor `tick` consults: which fixture positions prior runs
+    // already dittoed. Building this run's fixture from it guarantees one
+    // fresh, run-stamped item — so a re-dispatch against an already-planted
+    // index still performs (and verifies) a real paid publish instead of
+    // passing vacuously with nothing to do.
+    const alreadyDittoed = await dittoedResourceUrls(
+      relay,
+      identity.pubkey,
+      PROOF_SOURCE.id
+    );
+    const runStamp = process.env.GITHUB_RUN_ID
+      ? `${process.env.GITHUB_RUN_ID}.${process.env.GITHUB_RUN_ATTEMPT ?? '1'}`
+      : new Date().toISOString();
+    const below = new FixtureBelow({
+      fixtures: buildProofFixtures(alreadyDittoed, runStamp),
+    });
 
     const report = await runDevnetProof(
       {

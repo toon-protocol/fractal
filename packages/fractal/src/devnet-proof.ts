@@ -29,10 +29,13 @@ export const PROOF_SOURCE: SourceConfig = {
 };
 
 /**
- * A fixed, deterministic two-item fixture so every run of this proof against
- * a fresh index dittos the exact same candidates — repeatable by
- * construction, per this issue's rescope (no wall-clock timestamp, so a
- * re-run against a NEW index is byte-identical to the last one).
+ * The fixed, deterministic BASE of every run's fixture: a fresh index always
+ * dittos these exact two candidates first (no wall-clock timestamp, so a run
+ * against a NEW index is directly comparable to the last one). A real run's
+ * payload is built by `buildProofFixturePayload`, which appends one
+ * run-stamped item at a fresh position — that is what keeps a re-dispatch
+ * against an already-planted index publishing, since `tick`'s cursor skips
+ * every position it has already seen.
  */
 export const PROOF_FIXTURE_PAYLOAD: readonly Record<string, unknown>[] = [
   {
@@ -49,10 +52,90 @@ export const PROOF_FIXTURE_PAYLOAD: readonly Record<string, unknown>[] = [
   },
 ];
 
-/** The payload above, keyed the way `FixtureBelow` looks it up — ready to hand straight to `new FixtureBelow({ fixtures })`. */
+/** The base payload above, keyed the way `FixtureBelow` looks it up — ready to hand straight to `new FixtureBelow({ fixtures })`. Real runs use `buildProofFixtures` instead, which adds this run's fresh item. */
 export const PROOF_FIXTURES: Readonly<Record<string, unknown>> = {
   [fixtureKey(PROOF_SOURCE.id, FEED_RESOURCE)]: PROOF_FIXTURE_PAYLOAD,
 };
+
+/**
+ * The positional resource-URL prefix `feedAdapter`'s `buildResourceUrl` gives
+ * every candidate of `PROOF_SOURCE` (`<endpoint>/<resource>#<position>`) —
+ * the cursor namespace this proof's fixture grows within.
+ */
+const PROOF_RESOURCE_URL_PREFIX = `${PROOF_SOURCE.endpoint}/${FEED_RESOURCE}#`;
+
+/**
+ * The first fixture position no prior run has dittoed, derived from the same
+ * read-back cursor `tick` itself consults. The base payload occupies
+ * positions `0..PROOF_FIXTURE_PAYLOAD.length - 1`, so a fresh index starts
+ * right after it; on a reused index the highest position any prior run
+ * published wins.
+ */
+function nextProofFixturePosition(alreadyDittoed: ReadonlySet<string>): number {
+  let highest = PROOF_FIXTURE_PAYLOAD.length - 1;
+  for (const url of alreadyDittoed) {
+    if (!url.startsWith(PROOF_RESOURCE_URL_PREFIX)) {
+      continue;
+    }
+    const position = Number.parseInt(
+      url.slice(PROOF_RESOURCE_URL_PREFIX.length),
+      10
+    );
+    if (Number.isInteger(position) && position > highest) {
+      highest = position;
+    }
+  }
+  return highest + 1;
+}
+
+/**
+ * Builds this run's fixture payload: the fixed base items plus ONE
+ * run-stamped item at a position no prior run has dittoed (positions are the
+ * payload's array indices — see `feedAdapter`'s `buildResourceUrl`). This is
+ * what makes a re-dispatch against an already-planted index still perform a
+ * real paid publish: `tick` derives its cursor from read-back and skips
+ * every position it has already seen, so against an unchanged fixture a
+ * reuse run would publish nothing and the proof would pass vacuously.
+ * Positions between the base and the fresh one (possible when an earlier
+ * run failed mid-tick) are filled with deterministic placeholders; a gap
+ * that never actually published simply publishes its placeholder too — one
+ * extra paid ditto, never a wrong one.
+ */
+export function buildProofFixturePayload(
+  alreadyDittoed: ReadonlySet<string>,
+  runStamp: string
+): readonly Record<string, unknown>[] {
+  const next = nextProofFixturePosition(alreadyDittoed);
+  const payload = [...PROOF_FIXTURE_PAYLOAD];
+  for (let position = payload.length; position < next; position += 1) {
+    payload.push({
+      id: 100 + position,
+      title: `fractal devnet relay proof — position ${position} placeholder`,
+      by: 'fractal',
+      time: 1_800_000_000 + position * 3_600,
+    });
+  }
+  payload.push({
+    id: 100 + next,
+    title: `fractal devnet relay proof — run ${runStamp}`,
+    by: 'fractal',
+    time: 1_800_000_000 + next * 3_600,
+  });
+  return payload;
+}
+
+/** `buildProofFixturePayload`, keyed for `new FixtureBelow({ fixtures })` the same way `PROOF_FIXTURES` is. */
+export function buildProofFixtures(
+  alreadyDittoed: ReadonlySet<string>,
+  runStamp: string
+): Readonly<Record<string, unknown>> {
+  return {
+    [fixtureKey(PROOF_SOURCE.id, FEED_RESOURCE)]: buildProofFixturePayload(
+      alreadyDittoed,
+      runStamp
+    ),
+  };
+}
 
 /** The NIP-01 kind the feed medium dittos into — what this proof plants a mapping for and reads back to verify. */
 const DITTO_EVENT_KIND = 1;
@@ -133,7 +216,9 @@ export interface DevnetProofReport {
 /**
  * The devnet proof: plant this index if it isn't already living (reusing an
  * existing one otherwise — "prefer reusing an open channel over opening a
- * new one"), tick it once, then verify by reading the *same port* back
+ * new one" — and topping its channel up to the requested budget target,
+ * which `plant` would otherwise have done), tick it once, then verify by
+ * reading the *same port* back
  * rather than trusting either call's return value, and reconcile the
  * channel's live claim against the tick's self-reported fees (CONTEXT.md —
  * Ditto loop, Dimension identity; fractal#8/#32).
@@ -192,6 +277,13 @@ export async function runDevnetProof(
     ]);
     plantedEventsVerified =
       profileBack.length > 0 && seedBack.length > 0 && specBack.length > 0;
+  } else if (ports.relay.fundChannel) {
+    // `fundChannel` otherwise runs only inside `plant`, and plant only runs
+    // on a fresh index — so the reuse path must top the channel up here, or
+    // re-dispatching with a raised `budget_cap_base_units` would silently do
+    // nothing. The target is absolute ("top up to at least"), so this is a
+    // no-op whenever the channel already holds that much.
+    await ports.relay.fundChannel(request.budgetCap);
   }
 
   const channelSpendBefore = await ports.relay.channelSpend?.();
@@ -250,6 +342,16 @@ export async function runDevnetProof(
 /** Throws with a summary of every failed assertion — the workflow's fail-loud gate. */
 export function assertProofSucceeded(report: DevnetProofReport): void {
   const failures: string[] = [];
+  if (report.publishedDittoIds.length === 0) {
+    // Without this a reuse run whose cursor already covered every fixture
+    // position would pass every assertion having published nothing and
+    // verified nothing — a vacuous green. `buildProofFixtures` guarantees a
+    // fresh position per run, so an empty publish list here means the run
+    // did not exercise the paid path at all.
+    failures.push(
+      'no paid ditto was published this run — the proof exercised nothing'
+    );
+  }
   if (!report.plantedEventsVerified) {
     failures.push(
       'planted profile/seed/spec were not all visible on read-back'

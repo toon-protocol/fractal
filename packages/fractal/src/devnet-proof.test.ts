@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertProofSucceeded,
+  buildProofFixturePayload,
+  buildProofFixtures,
   buildProofSpec,
+  PROOF_FIXTURE_PAYLOAD,
   PROOF_FIXTURES,
   PROOF_SOURCE,
   runDevnetProof,
 } from './devnet-proof.js';
 import { deriveDimensionIdentity } from './identity.js';
+import { dittoedResourceUrls } from './relay-reads.js';
 import { InMemoryRelay } from './fakes/in-memory-relay.js';
 import { FixtureBelow } from './fakes/fixture-below.js';
 import { ChannelBudgetExceededError } from './ports/relay.js';
@@ -36,6 +40,8 @@ function below(): FixtureBelow {
 class ChanneledRelay implements RelayPort {
   private readonly inner = new InMemoryRelay();
   private claim = 0;
+  /** Every `fundChannel` target requested — lets tests assert the reuse path tops the channel up. */
+  readonly fundChannelCalls: number[] = [];
 
   constructor(
     private readonly deposit: number,
@@ -68,6 +74,7 @@ class ChanneledRelay implements RelayPort {
   }
 
   async fundChannel(desiredCap: number): Promise<number> {
+    this.fundChannelCalls.push(desiredCap);
     return Math.min(desiredCap, this.deposit);
   }
 }
@@ -145,7 +152,7 @@ describe('runDevnetProof', () => {
     expect(() => assertProofSucceeded(report)).not.toThrow();
   });
 
-  it('reuses an already-planted index instead of planting again, and ticks nothing new on unchanged fixtures', async () => {
+  it('fails loudly, not vacuously, when a reuse run publishes nothing (unchanged fixtures)', async () => {
     const relay = new InMemoryRelay();
     const request = {
       mnemonic: MNEMONIC,
@@ -162,7 +169,49 @@ describe('runDevnetProof', () => {
     const second = await runDevnetProof(request, { relay, below: below() });
     expect(second.plantedNow).toBe(false);
     expect(second.publishedDittoIds).toHaveLength(0);
+    // A run that published nothing proved nothing — it must not pass.
+    expect(() => assertProofSucceeded(second)).toThrow(/no paid ditto/);
+  });
+
+  it('re-dispatch against an already-planted index tops the channel up and publishes one fresh paid ditto', async () => {
+    const relay = new ChanneledRelay(1000);
+    const request = {
+      mnemonic: MNEMONIC,
+      index: 47,
+      utterance: 'fractal devnet relay proof',
+      relaySet: RELAY_SET,
+      budgetCap: 1000,
+    };
+    const identity = deriveDimensionIdentity(MNEMONIC, 47);
+
+    const first = await runDevnetProof(request, {
+      relay,
+      below: new FixtureBelow({
+        fixtures: buildProofFixtures(new Set(), 'run-1'),
+      }),
+    });
+    expect(first.plantedNow).toBe(true);
+    expect(first.publishedDittoIds).toHaveLength(3); // 2 base + run-1's item
+    expect(relay.fundChannelCalls).toEqual([1000]); // plant's own top-up
+
+    const alreadyDittoed = await dittoedResourceUrls(
+      relay,
+      identity.pubkey,
+      PROOF_SOURCE.id
+    );
+    const second = await runDevnetProof(request, {
+      relay,
+      below: new FixtureBelow({
+        fixtures: buildProofFixtures(alreadyDittoed, 'run-2'),
+      }),
+    });
+    expect(second.plantedNow).toBe(false);
+    // The reuse path must still top up — fundChannel otherwise only runs
+    // inside plant, and raising the budget input would silently do nothing.
+    expect(relay.fundChannelCalls).toEqual([1000, 1000]);
+    expect(second.publishedDittoIds).toHaveLength(1); // only run-2's fresh position
     expect(second.dittoReadBackVerified).toBe(true);
+    expect(second.reconciled).toBe(true);
     expect(() => assertProofSucceeded(second)).not.toThrow();
   });
 
@@ -237,6 +286,28 @@ describe('runDevnetProof', () => {
 
     expect(report.reconciled).toBe(false);
     expect(() => assertProofSucceeded(report)).toThrow(/reconcile/);
+  });
+
+  it('appends one run-stamped fixture item right after the base for a fresh index', () => {
+    const payload = buildProofFixturePayload(new Set(), 'run-1');
+    expect(payload).toHaveLength(PROOF_FIXTURE_PAYLOAD.length + 1);
+    expect(payload.slice(0, PROOF_FIXTURE_PAYLOAD.length)).toEqual([
+      ...PROOF_FIXTURE_PAYLOAD,
+    ]);
+    expect(payload.at(-1)?.title).toContain('run-1');
+  });
+
+  it('advances the run-stamped item past every already-dittoed position, filling gaps with placeholders', () => {
+    const alreadyDittoed = new Set([
+      `${PROOF_SOURCE.endpoint}/latest#0`,
+      `${PROOF_SOURCE.endpoint}/latest#1`,
+      `${PROOF_SOURCE.endpoint}/latest#4`,
+      'https://unrelated.example/latest#99', // another source's cursor never counts
+    ]);
+    const payload = buildProofFixturePayload(alreadyDittoed, 'run-5');
+    expect(payload).toHaveLength(6); // positions 0..5
+    expect(payload[3]?.title).toContain('placeholder');
+    expect(payload.at(-1)?.title).toContain('run-5');
   });
 
   it('builds a spec that names the proof source and NIP-01 mapping', () => {

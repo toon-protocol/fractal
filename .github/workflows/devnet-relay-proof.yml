@@ -32,8 +32,10 @@
 # It ditto-loops against a FIXED FIXTURE, not a live API (`PROOF_FIXTURES` in
 # devnet-proof.ts, served by `fakes/fixture-below.ts`'s `FixtureBelow`) — no
 # real Below port exists yet in this repo (that is a different, as-yet-unfiled
-# scope), and this issue is about the Relay port only. The fixture is
-# deterministic, so a fresh index always dittos the exact same two events.
+# scope), and this issue is about the Relay port only. The fixture is a
+# deterministic two-item base plus ONE run-stamped item at a fresh cursor
+# position (`buildProofFixtures`), so EVERY dispatch — fresh index or reuse —
+# publishes at least one real paid ditto; the job fails if it didn't.
 #
 # ── SAFETY ──────────────────────────────────────────────────────────────────
 #   * `apply` defaults to false. A dry run derives the dimension's identity
@@ -44,14 +46,14 @@
 #     (bin/devnet-relay-proof.ts) — the channel this run funds is opened
 #     lazily and topped up EXPLICITLY to `budget_cap_base_units` by
 #     `ToonRelay.fundChannel`, an absolute target (top up to at least this),
-#     never an increment — so re-dispatching this workflow against the same
-#     index is a safe no-op once the channel already holds that much
+#     never an increment — the top-up runs on EVERY apply run, plant or
+#     reuse, so it is a safe no-op once the channel already holds that much
 #     (same "absolute total, not an increment" discipline as
 #     funded-ops.yml's `deposit`).
 #   * An already-planted index is REUSED, not re-planted — plant.ts itself
 #     refuses to double-plant an index, and this script checks first so a
-#     re-run against the same index only ticks (mirrors "prefer reusing an
-#     open channel over opening a new one").
+#     re-run against the same index only tops up + ticks (mirrors "prefer
+#     reusing an open channel over opening a new one").
 #   * Every write is re-read back through the port before the job is allowed
 #     to pass: published dittos are independently visible on `readBack`, and
 #     the channel's real claim (`channelSpend`) is what fee reconciliation
@@ -158,7 +160,11 @@ jobs:
         run: node packages/fractal/dist/bin/devnet-relay-proof.js
 
       - name: Upload proof report
-        if: ${{ inputs.apply == 'true' }}
+        # `apply` is a `type: boolean` input, so `inputs.apply` is a real
+        # boolean here — comparing it to the STRING 'true' is always false
+        # (GitHub coerces mismatched types to numbers; 'true' becomes NaN),
+        # which silently skipped this upload on every run.
+        if: ${{ inputs.apply }}
         uses: actions/upload-artifact@v4
         with:
           name: devnet-relay-proof-report-${{ inputs.account_index }}

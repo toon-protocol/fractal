@@ -35,11 +35,17 @@ read its result back; it can never hold the mnemonic itself.
   the above. This is the only file in the repo that ever touches the live
   client.
 
-The ditto loop runs against a fixed, deterministic two-item fixture
-(`PROOF_SOURCE` / `PROOF_FIXTURE_PAYLOAD` in `devnet-proof.ts`), not a live
-API — no real Below port exists in this repo yet, and this proof is scoped
-to the Relay port only. A fresh dimension index always dittos the exact same
-two events, so a re-run is directly comparable to the last one.
+The ditto loop runs against a deterministic fixture (`PROOF_SOURCE` /
+`PROOF_FIXTURE_PAYLOAD` in `devnet-proof.ts`), not a live API — no real
+Below port exists in this repo yet, and this proof is scoped to the Relay
+port only. The fixture is the fixed two-item base plus **one run-stamped
+item at a fresh cursor position** (`buildProofFixtures`): `tick` derives its
+cursor from relay read-back and skips every position it has already
+published, so without the fresh item a re-dispatch against an
+already-planted index would publish nothing and prove nothing. With it,
+every dispatch — fresh index or reuse — performs at least one real paid
+publish and read-back, and the job fails (`assertProofSucceeded`) if it
+didn't.
 
 ## Dispatching it
 
@@ -48,7 +54,7 @@ From the Actions tab (or `gh workflow run devnet-relay-proof.yml -f apply=true .
 | Input | Meaning |
 | --- | --- |
 | `apply` | **Defaults to `false`.** A dry run only checks (via a free nostr read) whether `account_index` is already planted, and prints what an apply run would do. Nothing is sent. |
-| `account_index` | The NIP-06 dimension index to plant or reuse. Pick a fresh one to plant a new dimension; reuse an existing one to avoid opening a new channel. |
+| `account_index` | The NIP-06 dimension index to plant or reuse. Pick a fresh one to plant a new dimension; reuse an existing one to avoid opening a new channel — a reuse run still tops the channel up to `budget_cap_base_units` and still publishes (and verifies) one fresh paid ditto. |
 | `utterance` | The seed, only used if the index isn't already planted. |
 | `relay_set` | Comma-separated relay URLs. Defaults to the public devnet relay. |
 | `budget_cap_base_units` | Absolute channel deposit **target** (6dp USDC base units). `fundChannel` tops up to at least this — never an increment — so re-dispatching against the same index is a safe no-op once the channel already holds that much. |
@@ -60,9 +66,10 @@ An `apply: true` run that succeeds:
 1. Uploads a `devnet-relay-proof-report-<index>` artifact — the full JSON
    report (npub, published event ids, fee/budget reconciliation).
 2. Writes the same report as the job's step summary.
-3. Fails the job (`assertProofSucceeded`) if any published event wasn't
-   independently visible on read-back, or if the channel's live claim didn't
-   reconcile against the tick's reported fees.
+3. Fails the job (`assertProofSucceeded`) if the run published no paid ditto
+   at all, if any published event wasn't independently visible on read-back,
+   or if the channel's live claim didn't reconcile against the tick's
+   reported fees.
 
 ## Recording a run
 
