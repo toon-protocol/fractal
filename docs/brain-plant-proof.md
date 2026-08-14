@@ -1,10 +1,11 @@
 # Brain plant proof
 
 Proves the real Brain port (fractal#33's `ClaudeBrain`) against a live model:
-a real one-utterance `fractal plant "<seed>"` compiled through headless
-Claude — not the `ScriptedBrain` `claude-brain.test.ts` runs in CI. This is
-fractal#9's acceptance criteria, made repeatable by construction rather than
-by a written procedure a person has to follow correctly.
+one operator utterance compiled into a validated spec through headless Claude
+by the same `plant` use case `fractal plant "<seed>"` invokes — not the
+`ScriptedBrain` `claude-brain.test.ts` runs in CI. This is fractal#9's
+acceptance criteria, made repeatable by construction rather than by a written
+procedure a person has to follow correctly.
 
 ## Why a workflow, not a CLI command you run locally
 

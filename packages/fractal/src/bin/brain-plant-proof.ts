@@ -149,7 +149,10 @@ function printReport(
   }
 }
 
-async function writeJsonFile(path: string | undefined, value: unknown) {
+async function writeJsonFile(
+  path: string | undefined,
+  value: unknown
+): Promise<void> {
   if (!path) {
     return;
   }

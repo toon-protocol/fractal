@@ -5,10 +5,11 @@
 # fractal#33 built and unit-tested the real Brain port (`ClaudeBrain`)
 # against a `ScriptedBrain` fake — CI stayed model-free by design. What was
 # missing was proof the compile skill works against a LIVE model: a real
-# `fractal plant "<seed>"` producing a validated spec via headless Claude,
-# with the bounded-retry path sanity-checked against real model output
-# rather than only scripted fakes. That needs a credential that can spend
-# real model tokens (`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`).
+# one-utterance plant — the `plant` use case behind `fractal plant "<seed>"`
+# — producing a validated spec via headless Claude, with the bounded-retry
+# path sanity-checked against real model output rather than only scripted
+# fakes. That needs a credential that can spend real model tokens
+# (`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`).
 # `.sandcastle/sandbox-secrets.ts` forwards `CLAUDE_CODE_OAUTH_TOKEN` into
 # the agent sandbox only to authenticate the `claude-code` CLI driving the
 # agent itself — it is never a plain env var reachable by fractal's own
@@ -49,16 +50,20 @@
 # ── SAFETY ──────────────────────────────────────────────────────────────────
 #   * `apply` defaults to false. A dry run reports only whether credentials
 #     are present and what an apply run would do. It never calls the model.
-#   * A fresh index is required every run: `runBrainPlantProof` refuses to
-#     re-plant an index the (per-run, in-memory) relay already shows as
-#     planted, matching `plant`'s own real refusal — this run cannot
-#     accidentally double-spend model tokens on the same identity, since
-#     each dispatch starts a fresh in-memory relay regardless of the index
-#     given.
+#   * `runBrainPlantProof` refuses to plant an index the relay already shows
+#     as planted, mirroring `plant`'s own refusal. That guard is per-run, not
+#     cross-run: every dispatch starts a fresh in-memory relay, so it never
+#     fires here and the same `account_index` can be re-run freely. What
+#     bounds this workflow's model spend is the compile loop's own
+#     `MAX_SPEC_ATTEMPTS`, one plant per dispatch, and the job timeout — a
+#     re-dispatch simply compiles again; there is no chain or channel that
+#     could be double-spent.
 #   * No chain, wallet, or payment channel of any kind is touched — the
-#     `account_index`/`mnemonic` inputs exist only so
-#     `deriveDimensionIdentity` has something to derive from; the default
-#     mnemonic is a well-known public BIP-39 test phrase, not a secret.
+#     `account_index` input exists only so `deriveDimensionIdentity` has
+#     something to derive from, alongside a hardcoded default mnemonic
+#     (overridable via the `FRACTAL_BRAIN_PROOF_MNEMONIC` env var, which this
+#     workflow does not expose as an input) that is a well-known public
+#     BIP-39 test phrase, not a secret.
 #
 # ── REQUIRED SECRET ─────────────────────────────────────────────────────────
 #   One of ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (the same credential
