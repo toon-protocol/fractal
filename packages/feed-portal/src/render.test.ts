@@ -57,10 +57,9 @@ describe('renderDimensionView', () => {
     const dittoEl = container.querySelector(
       `[data-event-id="${FIXTURE_DITTO_EVENT.id}"]`
     );
-    const details = dittoEl?.querySelector('.provenance-details');
+    const details = dittoEl?.querySelector<HTMLElement>('.provenance-details');
 
-    expect(details).not.toBeNull();
-    expect((details as HTMLElement).hidden).toBe(true);
+    expect(details?.hidden).toBe(true);
   });
 
   it('reveals source + resource link on demand when the provenance toggle is clicked', () => {
@@ -73,8 +72,8 @@ describe('renderDimensionView', () => {
 
     toggle?.click();
 
-    const details = dittoEl?.querySelector('.provenance-details');
-    expect((details as HTMLElement).hidden).toBe(false);
+    const details = dittoEl?.querySelector<HTMLElement>('.provenance-details');
+    expect(details?.hidden).toBe(false);
     expect(details?.textContent).toContain('hn');
     expect(details?.querySelector('a')?.getAttribute('href')).toBe(
       'https://hn.example/top#0'

@@ -37,7 +37,13 @@ describe('buildDimensionView', () => {
   it('excludes profile/seed/spec/tick-report events from the feed', () => {
     const view = buildDimensionView(FIXTURE_PUBKEY, FIXTURE_EVENTS);
 
-    expect(view.feed).toHaveLength(3);
+    expect(new Set(view.feed.map((item) => item.id))).toEqual(
+      new Set([
+        FIXTURE_DITTO_EVENT.id,
+        FIXTURE_DITTO_EVENT_NO_PROVENANCE.id,
+        FIXTURE_INTERPRETATION_EVENT.id,
+      ])
+    );
   });
 
   it('orders the feed newest first', () => {

@@ -138,7 +138,6 @@ export function buildDimensionView(
 
   const feed = ownEvents
     .filter((event) => !NON_FEED_KINDS.has(event.kind))
-    .slice()
     .sort((a, b) => b.createdAt - a.createdAt)
     .map(toFeedItem);
 
