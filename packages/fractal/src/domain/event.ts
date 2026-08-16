@@ -21,6 +21,23 @@ export interface CandidateEvent {
   readonly provenance: Provenance;
 }
 
+/** NIP-01 profile metadata (mutable — later tickets bind ArNS names here). */
+export const PROFILE_EVENT_KIND = 0;
+/** Immutable dimension origin record — never republished after planting. */
+export const SEED_EVENT_KIND = 3300;
+/** The compiled, amendable dimension spec (amendment is a later ticket). */
+export const SPEC_EVENT_KIND = 3301;
+/**
+ * The per-tick economics log — not a ditto or interpretation, so it never
+ * passes through the NIP gate, same exemption the identity events above
+ * carry. Its `spent` field is the running spend total, so budget enforcement
+ * is derived from relay read-back rather than local process state
+ * (CONTEXT.md — Ditto loop, "the relay is the state of record"). When the
+ * relay port can report its channel's live claim (`channelSpend`), that
+ * claim outranks this field — see `tick`.
+ */
+export const TICK_REPORT_EVENT_KIND = 3302;
+
 /**
  * Interpretation's own kind — NIP-22's generic Comment kind, chosen
  * deliberately over an arbitrary fractal-only number: 1111 already means

@@ -1,5 +1,6 @@
 import { deriveDimensionIdentity, signEvent } from './identity.js';
 import { evaluateCandidate } from './domain/gate.js';
+import { TICK_REPORT_EVENT_KIND } from './domain/event.js';
 import { AdapterRegistry } from './adapters/registry.js';
 import { feedAdapter } from './adapters/feed.js';
 import {
@@ -17,16 +18,8 @@ import type {
   RelaySignedEvent,
 } from './ports/relay.js';
 
-/**
- * The per-tick economics log: not a ditto or interpretation, so it never
- * passes through the NIP gate — same exemption plant.ts's own identity
- * events already carry. Its `spent` field is the running spend total, so
- * budget enforcement is derived from relay read-back rather than local
- * process state (CONTEXT.md — Ditto loop, "the relay is the state of
- * record"). When the relay port can report its channel's live claim
- * (`channelSpend`), that claim outranks this field — see `tick`.
- */
-export const TICK_REPORT_EVENT_KIND = 3302;
+/** Re-exported, not declared here — the kind now lives in `domain/event.ts`; see plant.ts for why. */
+export { TICK_REPORT_EVENT_KIND };
 
 const ADAPTERS = new AdapterRegistry();
 ADAPTERS.register(feedAdapter);

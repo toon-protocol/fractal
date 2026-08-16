@@ -28,10 +28,10 @@ The full domain glossary is [CONTEXT.md](./CONTEXT.md). The founding spec is
 | Package | Name | Published | What it is |
 | --- | --- | --- | --- |
 | [`packages/fractal`](packages/fractal) | `@toon-protocol/fractal` | (not yet) | The **hands**: deterministic CLI + library — plant, fund, tick, gate, publish, read-back — plus the medium-adapter interface. |
+| [`packages/feed-portal`](packages/feed-portal) | `@toon-protocol/feed-portal` | never (deployed, not published) | The feed medium's **portal**: a browser app that renders a dimension by npub — dittos visually distinct from interpretation, provenance on demand, profile/seed/spec viewable. Free to browse; no wallet or writes. |
 
-Planned: a `feed-portal` package (the feed medium's permaweb app, deployed to
-Arweave, not npm-published) and a root Docker image bundling the hands,
-`toon-clientd`, the Claude runtime, and the brain skill.
+Planned: a root Docker image bundling the hands, `toon-clientd`, the Claude
+runtime, and the brain skill.
 
 ## Develop
 

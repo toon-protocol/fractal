@@ -1,16 +1,22 @@
 import { deriveDimensionIdentity, signEvent } from './identity.js';
 import { resolveRelaySet, validateSpec } from './domain/spec.js';
+import {
+  PROFILE_EVENT_KIND,
+  SEED_EVENT_KIND,
+  SPEC_EVENT_KIND,
+} from './domain/event.js';
 import type { DimensionSpec } from './domain/spec.js';
 import type { Seed } from './domain/seed.js';
 import type { BrainPort } from './ports/brain.js';
 import type { RelayPort } from './ports/relay.js';
 
-/** NIP-01 profile metadata (mutable — later tickets bind ArNS names here). */
-export const PROFILE_EVENT_KIND = 0;
-/** Immutable dimension origin record — never republished after planting. */
-export const SEED_EVENT_KIND = 3300;
-/** The compiled, amendable dimension spec (amendment is a later ticket). */
-export const SPEC_EVENT_KIND = 3301;
+/**
+ * Re-exported, not declared here: these kinds now live in `domain/event.ts`
+ * so the portal can import them from the `./domain` subpath without pulling
+ * in plant's relay/brain wiring. Kept on plant's surface because the modules
+ * that publish and read these events already import them from here.
+ */
+export { PROFILE_EVENT_KIND, SEED_EVENT_KIND, SPEC_EVENT_KIND };
 
 export interface PlantRequest {
   readonly utterance: string;

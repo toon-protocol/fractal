@@ -7,7 +7,13 @@ export type {
   InterpretationCandidate,
   Provenance,
 } from './event.js';
-export { INTERPRETATION_EVENT_KIND } from './event.js';
+export {
+  INTERPRETATION_EVENT_KIND,
+  PROFILE_EVENT_KIND,
+  SEED_EVENT_KIND,
+  SPEC_EVENT_KIND,
+  TICK_REPORT_EVENT_KIND,
+} from './event.js';
 export type { GateVerdict } from './gate.js';
 export {
   evaluateCandidate,
